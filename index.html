@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>間違えた問題ノート</title>
+<meta name="description" content="QBで間違えた問題を、電波が無くても見て解ける">
+<meta name="theme-color" content="#0f5c8a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="QBノート">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" href="icon-192.png">
+<style>
+/* 配置：上に同期（読み込み・書き出し）と要約、その下に切替と問題カード。解くときは1問ずつ全面表示 */
+:root{
+  --bg:#f1f4f7; --card:#ffffff; --ink:#1b2430; --sub:#5d6b7c; --line:#dde3ea;
+  --accent:#0f5c8a; --accent-ink:#ffffff;
+  --miss:#c2284d; --tri:#a35f00; --ok:#1d7a4b; --soft:#e8eef4;
+  --font:"Hiragino Sans","Yu Gothic UI","Meiryo",system-ui,sans-serif;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#12171d; --card:#1b222b; --ink:#e6ebf1; --sub:#9aa7b6; --line:#2a333f;
+  --accent:#6db3e0; --accent-ink:#0b1117; --miss:#ff7d9b; --tri:#ffb347; --ok:#5fd58f; --soft:#232c37; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#12171d; --card:#1b222b; --ink:#e6ebf1; --sub:#9aa7b6; --line:#2a333f;
+  --accent:#6db3e0; --accent-ink:#0b1117; --miss:#ff7d9b; --tri:#ffb347; --ok:#5fd58f; --soft:#232c37; color-scheme:dark}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font);font-size:15px;line-height:1.75;
+  padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+[hidden]{display:none!important}
+.wrap{max-width:780px;margin:0 auto;padding-inline:16px;padding-block:16px 72px}
+h1{font-size:22px;margin:0;letter-spacing:.02em}
+.meta{color:var(--sub);font-size:13px;margin-top:2px}
+.sync{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:12px 0;font-size:13px;color:var(--sub)}
+.sync .row{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.sync .row button{flex:1;min-width:140px}
+.pend{color:var(--tri);font-weight:700}
+.stats{display:flex;flex-wrap:wrap;gap:8px 18px;margin:14px 0 6px;font-variant-numeric:tabular-nums}
+.stats b{font-size:20px;margin-right:2px}
+.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:12px 0}
+.seg{display:flex;flex-wrap:wrap;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--card)}
+.seg button{border:0;border-radius:0;padding:7px 12px;background:transparent}
+.seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink)}
+button,select{font:inherit;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:7px 12px;cursor:pointer}
+button.go{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:700}
+button:focus-visible,select:focus-visible,summary:focus-visible,.pickable:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.controls.main button{flex:1;max-width:240px;padding:10px 14px;font-weight:700}
+#reviewTab,#dueTab{border-color:var(--accent);color:var(--accent)}
+#reviewTab[aria-pressed="true"],#dueTab[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink)}
+.item{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-block:10px}
+.top{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;font-size:13px;color:var(--sub)}
+.qid{font-weight:700;color:var(--accent);font-size:15px}
+.pill{border:1px solid currentColor;border-radius:999px;padding:0 10px;font-size:12px;font-variant-numeric:tabular-nums}
+.pill.miss{color:var(--miss)}.pill.prog{color:var(--ok)}.pill.due{color:var(--accent)}
+.pill.late{color:var(--accent-ink);background:var(--miss);border-color:var(--miss)}.pill.done{color:var(--accent-ink);background:var(--ok);border-color:var(--ok)}
+.q{margin:8px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}
+.choice{padding:2px 0;white-space:pre-wrap;overflow-wrap:anywhere}
+.choice.ans{color:var(--ok);font-weight:700}
+.choice.pickable{cursor:pointer;border:1px solid var(--line);border-radius:8px;padding:8px 12px;margin:8px 0}
+.choice.picked{border-color:var(--accent);background:var(--soft)}
+.choice.ng{color:var(--miss);border-color:var(--miss)}
+.choice.pickable.ans{border-color:var(--ok)}
+details summary{cursor:pointer;color:var(--accent);margin-top:8px}
+.exp{white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px;border-top:1px dashed var(--line);margin-top:10px;padding-top:10px}
+.hist{margin-top:8px;font-size:13px;color:var(--sub);display:flex;flex-wrap:wrap;gap:2px 14px;font-variant-numeric:tabular-nums}
+.x{color:var(--miss)}.t{color:var(--tri)}.o{color:var(--ok)}
+img.qimg{display:block;max-width:100%;border-radius:6px;margin-top:8px;background:#fff}
+.noimg{font-size:13px;color:var(--sub);margin-top:8px}
+details.grp>summary.subj{list-style:none;cursor:pointer;color:var(--ink);font-weight:700;margin:14px 0 2px;padding:10px 4px;
+  border-bottom:2px solid var(--accent);display:flex;align-items:baseline}
+details.grp>summary.subj::-webkit-details-marker{display:none}
+details.grp>summary.subj::before{content:"▸";color:var(--accent);margin-right:8px}
+details.grp[open]>summary.subj::before{content:"▾"}
+details.grp>summary.subj>span{margin-left:auto;font-size:12px;color:var(--sub);font-weight:400}
+.empty{padding:36px 8px;text-align:center;color:var(--sub)}
+.empty b{display:block;color:var(--ink);font-size:16px;margin-bottom:6px}
+.judge{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:12px;padding-top:10px;border-top:1px dashed var(--line);font-weight:700}
+.jbtn{min-width:56px;font-size:20px;font-weight:700;padding:6px 12px}
+.jbtn.on.j-x{background:var(--miss);border-color:var(--miss);color:var(--accent-ink)}
+.jbtn.on.j-t{background:var(--tri);border-color:var(--tri);color:var(--accent-ink)}
+.jbtn.on.j-o{background:var(--ok);border-color:var(--ok);color:var(--accent-ink)}
+.judge .note{font-weight:400;font-size:13px;color:var(--sub)}
+.nav{display:flex;justify-content:space-between;gap:8px;margin-top:12px}
+.nav button{padding:10px 18px}
+.toast{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));max-width:560px;margin:0 auto;background:var(--ink);color:var(--bg);
+  border-radius:10px;padding:10px 14px;font-size:14px;box-shadow:0 4px 16px rgba(0,0,0,.25)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>間違えた問題ノート</h1>
+  <div class="sync">
+    <div id="dataLine">読み込み中…</div>
+    <div id="recLine"></div>
+    <div class="row">
+      <button id="importBtn">問題データを読み込む</button>
+      <button id="exportBtn">記録を書き出す</button>
+    </div>
+    <input type="file" id="file" accept=".json,application/json" hidden>
+  </div>
+  <div class="stats" id="stats"></div>
+
+  <div id="listView">
+    <div class="controls">
+      <div class="seg" id="tabs" role="group" aria-label="表示">
+        <button data-tab="today" aria-pressed="false">今日間違えた</button>
+        <button data-tab="subject" aria-pressed="false">科目別</button>
+        <button data-tab="date" aria-pressed="false">日付別</button>
+        <button data-tab="cleared" aria-pressed="false">克服済み</button>
+      </div>
+    </div>
+    <div class="controls main">
+      <button id="reviewTab" aria-pressed="false">今日の復習</button>
+      <button id="dueTab" aria-pressed="true">総復習を始める</button>
+    </div>
+    <div class="controls">
+      <button class="go" id="start">1問ずつ解く</button>
+      <select id="sort" aria-label="並び順">
+        <option value="miss">間違い回数が多い順</option>
+        <option value="recent">最近間違えた順</option>
+        <option value="first">登録が古い順</option>
+      </select>
+      <button id="openAll">すべて開く</button>
+      <button id="closeAll">すべて閉じる</button>
+    </div>
+    <div id="list"></div>
+  </div>
+  <div id="reviewView" hidden></div>
+</div>
+<div class="toast" id="toast" role="status" hidden></div>
+<script src="lib.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
