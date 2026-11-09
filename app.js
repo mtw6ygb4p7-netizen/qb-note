@@ -206,7 +206,10 @@ async function recordReview() {
   local.attempts.push({ qid: r.it.id, key: "ipad:" + now, at: now, judge: rv.judge, src: "ipad", chosen: chosen.join(","), result });
   try { await kvSet({ local }); } catch (e) { toast("記録を保存できませんでした（" + (e && e.message || e) + "）"); }
 }
-function endReview() { $("reviewView").hidden = true; $("listView").hidden = false; rv = null; render(); }
+function endReview() {
+  $("reviewView").hidden = true; $("listView").hidden = false; rv = null; render();
+  if (navigator.serviceWorker && navigator.serviceWorker.controller && window.__swChanged) location.reload();
+}
 
 // ---- 読み込み・書き出し ----
 let toastTimer = 0;
@@ -380,4 +383,15 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden && to
   try { if (navigator.storage && navigator.storage.persist) await navigator.storage.persist(); } catch (e) {}
 })();
 render();
-if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+if ("serviceWorker" in navigator) {
+  // 新しい版が入ったら、1回だけ開き直して新しい版にする（解いている途中なら、一覧に戻ったときに）
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (!hadController || reloaded) return;
+    const go = () => { if (!reloaded) { reloaded = true; location.reload(); } };
+    window.__swChanged = true;
+    if ($("reviewView").hidden) go(); else toast("新しい版があります。一覧に戻ると入れ替わります");
+  });
+  navigator.serviceWorker.register("sw.js").then(r => r.update()).catch(() => {});
+}
