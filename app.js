@@ -1,6 +1,8 @@
 // iPad・iPhone用「間違えた問題ノート」（ホーム画面に置くと電波が無くても開ける）
-// データ：PCで作った「iPad用データ」（tools/qb_mobile.py data）を読み込んで端末（IndexedDB）に保存する。
-// 解いた記録も端末に保存し、「記録を書き出す」で拡張機能の「読み込み」にそのまま入るファイルにする。
+// 同期：「同期」ボタン（とアプリを開いたとき）で、GitHub の非公開リポジトリ（qb-note-data）から最新の問題（data.json）と画像を受け取り、
+//       この端末で解いた記録を records/<端末>.json に置く。PCの拡張機能（ghsync.js）が記録を取り込み、最新を data.json に置く。
+// 同期できないときは、ファイルで受け渡しもできる（PCの tools/qb_mobile.py data で作った「iPad用データ」／「記録を書き出す」）。
+// 解いた記録は端末（IndexedDB）に保存するので、オフラインでも解ける。
 // 出す日の計算は拡張機能と同じ lib.js（QB）を使う。
 "use strict";
 const $ = id => document.getElementById(id);
@@ -123,10 +125,11 @@ function syncLines() {
   const n = Object.keys(data.items || {}).length + Object.keys(data.examItems || {}).length;
   $("dataLine").textContent = !ready ? "読み込み中…" : data.exportedAt
     ? `問題データ：${new Date(data.exportedAt).toLocaleString("ja-JP")} にPCで作成（${n}問）` + (navigator.onLine === false ? "・オフライン" : "")
-    : "問題データがまだありません。PCで作った「iPad用データ」を読み込んでください。";
+    : "問題データがまだありません。「同期」を押してください。";
   const ex = new Set(local.exported), notYet = local.attempts.filter(t => !ex.has(t.key)).length;
-  $("recLine").innerHTML = notYet ? `<span class="pend">書き出していない記録 ${notYet}件</span>（ネットのあるときに「記録を書き出す」）`
-    : local.attempts.length ? `この端末の記録 ${local.attempts.length}件（すべて書き出し済み）` : "";
+  $("recLine").innerHTML = notYet ? `<span class="pend">まだ送っていない記録 ${notYet}件</span>（ネットのあるときに「同期」）` : "";
+  $("syncLine").textContent = syncing ? "同期中…" : !gh.token ? "同期の設定がまだです（下の「同期の設定」）"
+    : gh.lastAt ? "最後の同期 " + new Date(gh.lastAt).toLocaleString("ja-JP") + (gh.lastError ? "（失敗：" + gh.lastError + "）" : "") : "";
 }
 
 function render() {
@@ -150,7 +153,7 @@ function render() {
     b.textContent = `${b.dataset.label} ${got.length}` + (b.dataset.tab === "cleared" ? "" : `（未演習${un}）`);
   });
   $("list").innerHTML = pick.length ? grouped(pick)
-    : `<div class="empty"><b>${all.length ? (tab === "review" ? "今日登録した問題はありません" : tab === "due" ? "今日の総復習はありません（終わりました）" : "この表示に該当する問題はありません") : ready ? "問題がまだありません" : "読み込み中…"}</b>${all.length || !ready ? "" : "PCで「iPad用データを作って」と言い、できたファイルを「問題データを読み込む」で選んでください。"}</div>`;
+    : `<div class="empty"><b>${all.length ? (tab === "review" ? "今日登録した問題はありません" : tab === "due" ? "今日の総復習はありません（終わりました）" : "この表示に該当する問題はありません") : ready ? "問題がまだありません" : "読み込み中…"}</b>${all.length || !ready ? "" : "「同期の設定」で合鍵を保存してから「同期」を押してください。"}</div>`;
 }
 
 // ---- 1問ずつ解く（PCのノートと同じ：選んで答え合わせ → 自己判定 ◎○△× → 次へで記録） ----
@@ -218,7 +221,7 @@ async function importData(obj) {
   const keep = local.attempts.filter(t => !known.has(t.key));
   const lost = keep.filter(t => !ids.has(t.qid)).length;
   data = { exportedAt: obj.exportedAt, importedAt: new Date().toISOString(), items: obj.items || {}, examItems: obj.examItems || {} };
-  images = obj.images || {};
+  if (obj.images) images = obj.images; // 同期の data.json には画像が入らない（images/ から別に受け取る）
   local = { attempts: keep, exported: local.exported.filter(k => keep.some(t => t.key === k)) };
   await kvSet({ data, images, local });
   return { n: ids.size, lost };
@@ -264,6 +267,77 @@ $("exportBtn").onclick = async () => {
   render();
 };
 
+// ---- 同期（GitHub の非公開リポジトリ）----
+// gh：{token, repo, device, lastAt, lastError}（端末の中だけに保存）
+let gh = {}, syncing = false;
+const b64 = text => { const b = new TextEncoder().encode(text); let s = ""; for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000)); return btoa(s); };
+async function ghApi(path, opts = {}) {
+  const r = await fetch(`https://api.github.com/repos/${gh.repo}/contents/${path}`, { ...opts, cache: "no-store",
+    headers: { Authorization: "Bearer " + gh.token, Accept: opts.raw ? "application/vnd.github.raw+json" : "application/vnd.github+json", ...(opts.headers || {}) } });
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error(r.status === 401 ? "合鍵（トークン）が違うか期限切れです" : r.status === 403 ? "合鍵にこのリポジトリの読み書きの許可がありません" : "GitHub " + r.status);
+  return opts.raw ? r : r.json();
+}
+const blobToDataUrl = b => new Promise((ok, no) => { const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.onerror = () => no(fr.error); fr.readAsDataURL(b); });
+async function sync(quiet) {
+  if (syncing) return;
+  if (!gh.token || !gh.repo) { if (!quiet) { $("syncSet").open = true; toast("先に「同期の設定」で合鍵を保存してください"); } return; }
+  if (navigator.onLine === false) { if (!quiet) toast("オフラインのため同期できません（解いた記録は端末に残っています）"); return; }
+  syncing = true; render();
+  try {
+    // 1. この端末の記録を送る（端末ごとに1ファイル。PCに入った記録は次に問題を受け取ったとき端末から外れる）
+    let sent = 0;
+    const path = "records/" + gh.device + ".json";
+    if (local.attempts.length || local.exported.length) {
+      const cur = await ghApi(path);
+      await ghApi(path, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+        message: "記録 " + gh.device, ...(cur && cur.sha ? { sha: cur.sha } : {}),
+        content: b64(JSON.stringify({ device: gh.device, updatedAt: new Date().toISOString(), attempts: local.attempts })) }) });
+      const ex = new Set(local.exported); sent = local.attempts.filter(t => !ex.has(t.key)).length;
+      local.exported = local.attempts.map(t => t.key);
+      await kvSet({ local });
+    }
+    // 2. 最新の問題を受け取る
+    let got = 0;
+    const r = await ghApi("data.json", { raw: true });
+    if (r) {
+      const obj = await r.json();
+      if (obj.exportedAt !== data.exportedAt) { got = (await importData(obj)).n; }
+    }
+    // 3. まだ端末に無い画像を受け取る
+    let imgs = 0;
+    for (const it of allItems()) for (const u of it.images || []) {
+      if (images[u]) continue;
+      const ir = await ghApi("images/" + u.split("/").pop(), { raw: true });
+      if (!ir) continue; // PCがまだ置いていない
+      images[u] = await blobToDataUrl(await ir.blob()); imgs++;
+    }
+    if (imgs) await kvSet({ images });
+    gh.lastAt = Date.now(); gh.lastError = "";
+    if (!quiet || sent || got) toast("同期しました" + (got ? `（最新の問題を受け取りました：${got}問` : "（問題は最新") + (sent ? `・記録${sent}件を送信）` : "）") + (imgs ? ` 画像${imgs}枚` : ""));
+  } catch (e) {
+    gh.lastAt = Date.now(); gh.lastError = String(e && e.message || e);
+    if (!quiet) toast("同期できませんでした：" + gh.lastError);
+  } finally {
+    syncing = false;
+    try { await kvSet({ gh }); } catch (e) {}
+    if ($("reviewView").hidden) render();
+  }
+}
+$("syncBtn").onclick = () => sync(false);
+$("ghSave").onclick = async () => {
+  const token = $("ghToken").value.trim() || gh.token, repo = $("ghRepo").value.trim();
+  if (!token || !/^[\w.-]+\/[\w.-]+$/.test(repo)) { toast("リポジトリ（ユーザー名/名前）と合鍵を入れてください"); return; }
+  gh = { ...gh, token, repo };
+  await kvSet({ gh });
+  $("ghToken").value = ""; $("syncSet").open = false;
+  sync(false);
+};
+function showGhForm() {
+  $("ghRepo").value = gh.repo || "mtw6ygb4p7-netizen/qb-note-data";
+  $("ghToken").placeholder = gh.token ? "合鍵は保存済み（変えるときだけ貼り付け）" : "合鍵（トークン）を貼り付け";
+}
+
 // ---- 操作 ----
 $("tabs").onclick = e => { const t = e.target.dataset.tab; if (t) setTab(t); };
 $("sort").onchange = render;
@@ -279,7 +353,7 @@ $("dueTab").onclick = () => setTab("due");
 $("reviewTab").onclick = () => setTab("review");
 // いま表示している一覧を1問ずつ（解き直して○でも記録は今日のいちばん悪い評価のまま）
 $("start").onclick = () => { queue = view().pick; if (!queue.length) return; pos = 0; rv = { chosen: new Set(), reveal: false, judge: null }; $("listView").hidden = true; $("reviewView").hidden = false; showReview(); };
-addEventListener("online", () => { if ($("reviewView").hidden) render(); });
+addEventListener("online", () => { if ($("reviewView").hidden) render(); sync(true); });
 addEventListener("offline", () => { if ($("reviewView").hidden) render(); });
 // 日をまたいで開きっぱなしでも、今日の分を出し直す
 let lastDay = today();
@@ -292,9 +366,16 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden && to
     if (d) data = d;
     if (im) images = im;
     if (lc) local = { attempts: lc.attempts || [], exported: lc.exported || [] };
+    gh = (await kvGet("gh")) || {};
+    if (!gh.device) { // 端末ごとの名前（記録のファイル名になる）
+      gh.device = (/iPad|Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1 ? "ipad" : /iPhone/.test(navigator.userAgent) ? "iphone" : "web") + "-" + Math.random().toString(36).slice(2, 8);
+      await kvSet({ gh });
+    }
   } catch (e) { toast("端末の保存領域を開けませんでした（" + (e && e.message || e) + "）"); }
   ready = true;
+  showGhForm();
   render();
+  sync(true); // 開いたら、つながっていれば自動で同期する
   // 端末の保存を消されにくくする（ホーム画面に置いたアプリは通常消されない）
   try { if (navigator.storage && navigator.storage.persist) await navigator.storage.persist(); } catch (e) {}
 })();

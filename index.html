@@ -39,6 +39,9 @@ h1{font-size:22px;margin:0;letter-spacing:.02em}
 .sync{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:12px 0;font-size:13px;color:var(--sub)}
 .sync .row{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
 .sync .row button{flex:1;min-width:140px}
+.sync .row input{flex:2;min-width:180px;font:inherit;font-size:16px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:7px 10px}
+.sync details summary{font-size:13px;margin-top:8px}
+#syncBtn{padding:10px 14px}
 .pend{color:var(--tri);font-weight:700}
 .stats{display:flex;flex-wrap:wrap;gap:8px 18px;margin:14px 0 6px;font-variant-numeric:tabular-nums}
 .stats b{font-size:20px;margin-right:2px}
@@ -97,10 +100,25 @@ details.grp>summary.subj>span{margin-left:auto;font-size:12px;color:var(--sub);f
   <div class="sync">
     <div id="dataLine">読み込み中…</div>
     <div id="recLine"></div>
+    <div id="syncLine"></div>
     <div class="row">
-      <button id="importBtn">問題データを読み込む</button>
-      <button id="exportBtn">記録を書き出す</button>
+      <button class="go" id="syncBtn">同期</button>
     </div>
+    <details id="syncSet">
+      <summary>同期の設定</summary>
+      <div class="row">
+        <input id="ghRepo" placeholder="ユーザー名/qb-note-data" autocomplete="off" autocapitalize="off" spellcheck="false">
+        <input id="ghToken" type="password" placeholder="合鍵（トークン）を貼り付け" autocomplete="off">
+        <button id="ghSave">保存</button>
+      </div>
+    </details>
+    <details>
+      <summary>ファイルで受け渡し（同期できないとき）</summary>
+      <div class="row">
+        <button id="importBtn">問題データを読み込む</button>
+        <button id="exportBtn">記録を書き出す</button>
+      </div>
+    </details>
     <input type="file" id="file" accept=".json,application/json" hidden>
   </div>
   <div class="stats" id="stats"></div>
