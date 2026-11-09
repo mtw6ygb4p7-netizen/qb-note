@@ -219,12 +219,14 @@ function render() {
   $("reviewTab").textContent = `今日の復習（${newToday}問）`;
   $("dueTab").textContent = `総復習を始める（残り${set.length - done}問）`;
   const ldToday = ld(new Date().toISOString());
-  document.querySelectorAll("#tabs button").forEach(b => {
+  // タブの下の小さな字：問題数（未演習＝登録してから一度も復習していない数）。タグはタグの数
+  document.querySelectorAll("#tabs button, #tabs2 button").forEach(b => {
     b.setAttribute("aria-pressed", String(b.dataset.tab === tab));
-    b.dataset.label = b.dataset.label || b.textContent;
-    if (b.dataset.tab === "tag") { b.textContent = b.dataset.label; return; }
+    const sm = b.querySelector("small");
+    if (b.dataset.tab === "tag") { sm.textContent = `${new Set(all.flatMap(r => r.it.tags || [])).size}種類`; return; }
     const got = pickTab(b.dataset.tab, all, ldToday), un = got.filter(r => r.d.unreviewed).length;
-    b.textContent = `${b.dataset.label} ${got.length}` + (b.dataset.tab === "cleared" ? "" : `（未演習${un}）`);
+    const unText = b.dataset.tab === "cleared" ? "" : `未演習${un}`;
+    if (b.closest("#tabs")) sm.innerHTML = `${got.length}問<br>${unText}`; else sm.textContent = `${got.length}問` + (unText ? `（${unText}）` : "");
   });
   const pages = pagesOf(picked, byKey);
   $("list").innerHTML = pages.length ? grouped(pages)
@@ -551,7 +553,7 @@ function showGhForm() {
 }
 
 // ---- 操作 ----
-$("tabs").onclick = e => { const t = e.target.closest("button"); if (t && t.dataset.tab) setTab(t.dataset.tab); };
+$("tabs").onclick = $("tabs2").onclick = e => { const t = e.target.closest("button"); if (t && t.dataset.tab) setTab(t.dataset.tab); };
 $("tagBar").onclick = e => { const b = e.target.closest("[data-tag]"); if (b) { curTag = b.dataset.tag; lsSet("qb_tag", curTag); render(); } };
 $("sort").onchange = render;
 $("list").addEventListener("toggle", e => {
