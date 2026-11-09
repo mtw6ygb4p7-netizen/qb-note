@@ -84,7 +84,7 @@ const pickTab = (t, all, day) => t === "review" ? all.filter(r => r.d.missToday)
   : t === "tag" ? all.filter(r => curTag && (r.it.tags || []).includes(curTag))
   : (t === "subject" || t === "date" || t === "exam") ? all.filter(r => !r.d.cleared)
   : all.filter(r => !r.d.cleared && r.d.lastMissAt && ld(r.d.lastMissAt) === day);
-const tabName = t => ({ review: "今日の復習", due: "総復習", today: "今日間違えた", subject: "科目別", exam: "回数別", date: "日付別", tag: "タグ「" + curTag + "」", cleared: "克服済み" }[t] || "");
+const tabName = t => ({ review: "今日の復習", due: "総復習", today: "今日間違えた", subject: "科目別", exam: "年度別", date: "日付別", tag: "タグ「" + curTag + "」", cleared: "克服済み" }[t] || "");
 
 const subNo = it => Number((String(it.label || "").match(/(\d+)$/) || [])[1] || 0);
 function view() {
