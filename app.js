@@ -66,7 +66,7 @@ function allItems() {
 }
 
 // ---- 一覧 ----
-const TABS = ["review", "due", "today", "subject", "exam", "date", "tag", "cleared"];
+const TABS = ["review", "due", "today", "subject", "exam", "date", "tag", "leech", "cleared"];
 let tab = lsGet("qb_tab", "due");
 if (!TABS.includes(tab)) tab = "due";
 let curTag = lsGet("qb_tag", "");
@@ -82,12 +82,14 @@ const pickTab = (t, all, day) => t === "review" ? all.filter(r => r.d.missToday)
   : t === "due" ? all.filter(r => r.d.inToday && !r.d.missToday)
   : t === "cleared" ? all.filter(r => r.d.cleared)
   : t === "tag" ? all.filter(r => curTag && (r.it.tags || []).includes(curTag))
+  // 苦手＝×・△にした日数が QB.LEECH 日に達した問題（克服したものは克服済みへ）
+  : t === "leech" ? all.filter(r => r.d.leech && !r.d.cleared)
   // 科目別＝QBの科目別（分野別）から解いた問題だけ。年度別＝QBの回数別から解いた、科目別に無い問題だけ（拡張機能の分け方と同じ）
   : t === "subject" ? all.filter(r => !r.d.cleared && !r.it.exam)
   : t === "exam" ? all.filter(r => !r.d.cleared && r.it.exam)
   : t === "date" ? all.filter(r => !r.d.cleared)
   : all.filter(r => !r.d.cleared && r.d.lastMissAt && ld(r.d.lastMissAt) === day);
-const tabName = t => ({ review: "今日の復習", due: "総復習", today: "今日間違えた", subject: "科目別", exam: "年度別", date: "日付別", tag: "タグ「" + curTag + "」", cleared: "克服済み" }[t] || "");
+const tabName = t => ({ review: "今日の復習", due: "総復習", today: "今日間違えた", subject: "科目別", exam: "年度別", date: "日付別", tag: "タグ「" + curTag + "」", leech: "苦手", cleared: "克服済み" }[t] || "");
 
 const subNo = it => Number((String(it.label || "").match(/(\d+)$/) || [])[1] || 0);
 function view() {
@@ -129,7 +131,8 @@ function badges(d) {
     + `<span class="pill prog">段階 ${Math.max(d.step, 0) + 1}/${QB.LADDER.length}</span>`
     + (d.due ? `<span class="pill ${d.due < today() ? "late" : "due"}">次 ${esc(QB.dueText(d.due))}</span>` : "");
 }
-const statusPills = r => r.d.miss > 0 ? `<span class="pill miss">${r.d.miss}回間違い</span>${badges(r.d)}` : '<span class="pill ok">○ QBで正解</span>';
+const leechPill = d => d.leech ? `<span class="pill leech" title="×・△にした日が${d.missDays}日">苦手</span>` : "";
+const statusPills = r => r.d.miss > 0 ? `${leechPill(r.d)}<span class="pill miss">${r.d.miss}回間違い</span>${badges(r.d)}` : '<span class="pill ok">○ QBで正解</span>';
 const tagChips = tags => tags.map(t => `<span class="chip">#${esc(t)}</span>`).join("");
 // 連問の小問の文。以前の記録（114A91）は小問の文の代わりに前文が入っているので、その旨を出す（PCの取り込みで読み直すと直る）
 const subBody = (it, series) => { if (!series) return it.text; const x = QB.splitText(it.text);
@@ -156,7 +159,7 @@ function card(p) {
     ${lead.it.required ? '<span class="pill due">必修</span>' : ""}${series ? '<span class="pill">連問</span>' : statusPills(lead)}
     ${series ? "" : `<span>最終 ${lead.d.lastMissAt ? ld(lead.d.lastMissAt) : "-"}</span>`}${tagChips(tagsOfPage(p))}</div>
     ${series ? `<div class="q">${esc(pre)}</div>` : ""}${imgTags(qImgs)}${subs}
-    <div class="acts"><button data-act="del">削除</button>${p.members.some(m => m.d.cleared) ? '<button data-act="back">一覧に戻す</button>' : ""}</div></article>`;
+    <div class="acts"><button data-act="del">削除</button>${p.members.some(m => m.d.cleared) ? '<button data-act="back">一覧に戻す</button>' : ""}${p.members.some(m => m.d.leech) ? '<button data-act="unleech">苦手から外す</button>' : ""}</div></article>`;
 }
 
 // まとめ方：科目別（QBの分野順 → 年度別 → 未分類）／回数別（新しい回から）／日付別（最後に間違えた日、新しい順）
@@ -233,7 +236,7 @@ function render() {
   });
   const pages = pagesOf(picked, byKey);
   $("list").innerHTML = pages.length ? grouped(pages)
-    : `<div class="empty"><b>${all.length ? (tab === "review" ? "今日登録した問題はありません" : tab === "due" ? "今日の総復習はありません（終わりました）" : tab === "tag" ? "タグの付いた問題はありません" : "この表示に該当する問題はありません") : ready ? "問題がまだありません" : "読み込み中…"}</b>${all.length || !ready ? "" : "「同期の設定」で合鍵を保存してから「同期」を押してください。"}</div>`;
+    : `<div class="empty"><b>${all.length ? (tab === "review" ? "今日登録した問題はありません" : tab === "due" ? "今日の総復習はありません（終わりました）" : tab === "tag" ? "タグの付いた問題はありません" : tab === "leech" ? `苦手の問題はありません（×・△が${QB.LEECH}日になると入ります）` : "この表示に該当する問題はありません") : ready ? "問題がまだありません" : "読み込み中…"}</b>${all.length || !ready ? "" : "「同期の設定」で合鍵を保存してから「同期」を押してください。"}</div>`;
 }
 
 // ---- 1問ずつ解く ----
@@ -308,7 +311,7 @@ function showReview(top) {
     }).join("");
     const body = subBody(it, series);
     return `<div class="${series ? "subq" : ""}${solve ? "" : " done"}">
-      ${series ? `<div class="top"><span class="qid">${esc(it.label)}</span>${solve ? `<span class="pill miss">✖ ${d.miss}回間違い・解く</span>` : '<span class="pill ok">○ QBで正解（答えは選択済み）</span>'}${ans.length > 1 && solve ? `<span>（${ans.length}つ選ぶ）</span>` : ""}</div>` : ""}
+      ${series ? `<div class="top"><span class="qid">${esc(it.label)}</span>${leechPill(d)}${solve ? `<span class="pill miss">✖ ${d.miss}回間違い・解く</span>` : '<span class="pill ok">○ QBで正解（答えは選択済み）</span>'}${ans.length > 1 && solve ? `<span>（${ans.length}つ選ぶ）</span>` : ""}</div>` : ""}
       <div class="q">${esc(body)}</div><div class="choices">${ch}</div>
       ${shown ? `<div class="exp">正解：${esc(it.answer)}\n\n${esc(it.explanation)}</div>${imgTags(im.exp)}
         ${solve ? `<div class="judge">自己判定：${judgeBtns(it.id, st.judge)}<span class="note">${st.judge ? "この判定で記録しました" : "判定を選ぶと記録します"}</span></div>` : ""}` : ""}</div>`;
@@ -320,7 +323,7 @@ function showReview(top) {
   const y = window.scrollY;
   $("reviewView").innerHTML = `<div class="meta">${esc(ses.name)} ${ses.pos + 1} / ${pages.length}${nAns > 1 ? "　（" + nAns + "つ選ぶ）" : ""}</div>
     <article class="item"><div class="top"><span class="qid">${esc(pageLabel(p))}</span>${p.lead.it.required ? '<span class="pill due">必修</span>' : ""}
-      ${series ? '<span class="pill">連問</span>' : `<span class="pill miss">${p.lead.d.miss}回間違い</span>`}</div>
+      ${series ? '<span class="pill">連問</span>' : `${leechPill(p.lead.d)}<span class="pill miss">${p.lead.d.miss}回間違い</span>`}</div>
     <div class="tags">${tags.map(t => `<span class="chip">#${esc(t)}<button class="x" data-untag="${esc(t)}" aria-label="タグ ${esc(t)} を外す">×</button></span>`).join("")}
       <input id="tagIn" list="tagList" placeholder="タグを追加" enterkeyhint="done" autocomplete="off"><button id="tagAdd">追加</button>
       <datalist id="tagList">${known.map(t => `<option value="${esc(t)}">`).join("")}</datalist>
@@ -390,13 +393,18 @@ function addOps(qids, op) {
   persistLocal();
 }
 // 解いた記録（このセッションのこの問題は1件。判定を変えたら上書き）
+// ×・△で苦手の日数に達したら知らせる（Anki のリーチの知らせと同じ）。判定を○に戻せば、苦手からも外れる（記録から計算し直すため）
+const leechOf = qid => { const x = allItems().find(i => i.id === qid); return x ? QB.derive(x) : null; };
 function recordAttempt(it, st) {
+  const was = leechOf(it.id);
   const key = dev() + ":" + ses.id + ":" + it.id;
   const ans = answersOf(it), chosen = st.chosen;
   const result = !chosen.length || !ans.length ? null : ans.length === chosen.length && ans.every(n => chosen.includes(n)) ? "正解" : "不正解";
   const ex = local.attempts.find(t => t.key === key);
   if (ex) Object.assign(ex, { judge: st.judge, chosen: chosen.join(","), result });
   else local.attempts.push({ qid: it.id, key, at: new Date().toISOString(), judge: st.judge, src: dev(), chosen: chosen.join(","), result });
+  const now = leechOf(it.id);
+  if (now && now.leech && !(was && was.leech)) toast(`${it.label}：×・△が${now.missDays}日目です。定着しにくい問題として「苦手」に入れました`);
   persistLocal();
 }
 let syncSoon = 0;
@@ -542,6 +550,37 @@ async function sync(quiet) {
   }
 }
 $("syncBtn").onclick = () => sync(false);
+
+// ---- QBから取り込み（PCのEdgeで拡張機能が入っているときだけ。拡張機能の notebridge.js が取り次ぐ）----
+// iPad・スマホで解いた分は、拡張機能が3時間ごとにQBのサーバーから読む。これを今すぐ行う。
+// 流れ：取り込み → 拡張機能が data.json を置く → アプリが同期して受け取る
+let catchupReq = 0; // 押した時刻（待っていないときは0）
+const extPost = m => window.postMessage({ qbApp: true, ...m }, location.origin);
+function onExtStatus(c, g) {
+  const btn = $("catchupBtn"), line = $("catchupLine");
+  btn.hidden = line.hidden = false;
+  line.textContent = c.running ? "QBから取り込み中…（1〜2分）"
+    : c.finishedAt ? "QBからの取り込み：" + new Date(c.finishedAt).toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })
+      + (c.error ? "（失敗：" + c.error + "）" : `（${c.recorded || 0}件）`) + "　自動は3時間ごと" : "";
+  if (catchupReq && Date.now() - catchupReq > 16 * 60 * 1000) catchupReq = 0; // 時間切れ
+  btn.disabled = !!(c.running || catchupReq);
+  if (!catchupReq || c.running || !(c.finishedAt >= catchupReq)) return;
+  if (c.error) { catchupReq = 0; btn.disabled = false; toast("取り込めませんでした：" + c.error); return; }
+  if (!c.recorded) { catchupReq = 0; btn.disabled = false; toast("QBに新しい解答はありませんでした"); return; }
+  if (!(g.at >= c.finishedAt)) { line.textContent = `QBから${c.recorded}件取り込みました。アプリへ送っています…`; return; }
+  catchupReq = 0; btn.disabled = false;
+  const go = () => syncing ? setTimeout(go, 2000) : sync(false);
+  go();
+}
+window.addEventListener("message", e => {
+  const m = e.data;
+  if (e.source !== window || !m || m.qbExt !== true) return;
+  if (m.type === "ready") extPost({ type: "hello" });
+  else if (m.type === "status") onExtStatus(m.catchup || {}, m.gh || {});
+  else if (m.type === "catchupStarted" && !m.ok && m.reason !== "実行中") { catchupReq = 0; $("catchupBtn").disabled = false; toast("取り込みを始められませんでした：" + (m.reason || "")); }
+});
+extPost({ type: "hello" });
+$("catchupBtn").onclick = () => { catchupReq = Date.now(); $("catchupBtn").disabled = true; toast("QBから取り込みます（1〜2分）。終わったら自動で同期します"); extPost({ type: "catchup" }); };
 $("ghSave").onclick = async () => {
   const token = $("ghToken").value.trim() || gh.token, repo = $("ghRepo").value.trim();
   if (!token || !/^[\w.-]+\/[\w.-]+$/.test(repo)) { toast("リポジトリ（ユーザー名/名前）と合鍵を入れてください"); return; }
@@ -572,6 +611,9 @@ $("list").addEventListener("click", e => {
   if (b.dataset.act === "del") {
     if (!confirm("この問題を記録から削除しますか？（このあとQBでまた間違えると、もう一度登録されます）")) return;
     addOps(members.map(m => m.it.id), "delete");
+  } else if (b.dataset.act === "unleech") {
+    if (!confirm(`「苦手」から外しますか？（今日までの間違いは数えなくなります。また${QB.LEECH}日間違えると苦手に戻ります）`)) return;
+    addOps(members.filter(m => m.d.leech).map(m => m.it.id), "unleech");
   } else if (b.dataset.act === "back") {
     addOps(members.filter(m => m.d.cleared).map(m => m.it.id), "reset");
   }

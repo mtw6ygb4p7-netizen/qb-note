@@ -24,6 +24,7 @@ const QB = {
   LADDER: [1, 3, 7, 14, 30],
   EXAM_DATE: "2027-02-14", // 国家試験の日（要確認）。この3日前より後には出さない
   EXAM_MARGIN: 3,
+  LEECH: 3, // 苦手にする「×・△にした日数」（Anki のリーチのしきい値。Anki は8回だが、国試まで短いので3日）
   dayKey(iso) {
     const d = new Date(iso);
     return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
@@ -78,7 +79,11 @@ const QB = {
     const inToday = !before.cleared && !!before.due && before.due <= today;
     const missToday = !!todayFirst && QB.isMiss(todayFirst);
     const cleared = miss > 0 && now.cleared;
-    return { miss, lastMissAt, lastMissJudge, cleared, attempts, step: now.step, due: now.due,
+    // 苦手（定着しにくい問題。Anki のリーチと同じ考え方）：×・△にした日数が LEECH 日に達した問題。
+    // 同じ日に何回間違えても1日。QBで間違えた日も数える。「苦手から外す」（leechResetAt）より前の日は数えない
+    const missDays = days.filter((x) => QB.isMiss(x.judge) && (!item.leechResetAt || x.day > QB.dayKey(item.leechResetAt))).length;
+    const leech = missDays >= QB.LEECH;
+    return { miss, lastMissAt, lastMissJudge, cleared, attempts, step: now.step, due: now.due, missDays, leech,
              dueBefore: before.due, inToday, missToday, unreviewed: !now.cleared && days.length <= 1, doneToday: !!todayFirst, todayFirst };
   },
   // 「次 11/12（3日後）」の形
@@ -152,6 +157,7 @@ const QB = {
   //   {key, qid, op: "tags", tags: [..], at}   タグをこの内容にする（tagsAt より新しいときだけ）
   //   {key, qid, op: "reset", at}             at までの○・◎を「−」にして、克服済みから一覧に戻す
   //   {key, qid, op: "delete", at}            削除（at より後にまた解いた記録があれば消さない）
+  //   {key, qid, op: "unleech", at}           苦手から外す（at の日までの×・△を苦手の日数に数えない。また LEECH 日間違えると苦手に戻る）
   applyOps(it, ops) {
     let out = it;
     for (const o of [...(ops || [])].sort((a, b) => (a.at < b.at ? -1 : 1))) {
@@ -161,6 +167,8 @@ const QB = {
       } else if (o.op === "reset") {
         if ((out.attempts || []).some((t) => t.at <= o.at && QB.isCorrect(t.judge)))
           out = { ...out, attempts: out.attempts.map((t) => (t.at <= o.at && QB.isCorrect(t.judge) ? { ...t, judge: "−" } : t)) };
+      } else if (o.op === "unleech") {
+        if (!out.leechResetAt || o.at > out.leechResetAt) out = { ...out, leechResetAt: o.at };
       } else if (o.op === "delete") {
         if (!(out.attempts || []).some((t) => t.at > o.at)) out = null;
       }
