@@ -82,7 +82,10 @@ const pickTab = (t, all, day) => t === "review" ? all.filter(r => r.d.missToday)
   : t === "due" ? all.filter(r => r.d.inToday && !r.d.missToday)
   : t === "cleared" ? all.filter(r => r.d.cleared)
   : t === "tag" ? all.filter(r => curTag && (r.it.tags || []).includes(curTag))
-  : (t === "subject" || t === "date" || t === "exam") ? all.filter(r => !r.d.cleared)
+  // 科目別＝QBの科目別（分野別）から解いた問題だけ。年度別＝QBの回数別から解いた、科目別に無い問題だけ（拡張機能の分け方と同じ）
+  : t === "subject" ? all.filter(r => !r.d.cleared && !r.it.exam)
+  : t === "exam" ? all.filter(r => !r.d.cleared && r.it.exam)
+  : t === "date" ? all.filter(r => !r.d.cleared)
   : all.filter(r => !r.d.cleared && r.d.lastMissAt && ld(r.d.lastMissAt) === day);
 const tabName = t => ({ review: "今日の復習", due: "総復習", today: "今日間違えた", subject: "科目別", exam: "年度別", date: "日付別", tag: "タグ「" + curTag + "」", cleared: "克服済み" }[t] || "");
 
@@ -162,13 +165,13 @@ function grouped(pages) {
   const g = new Map(), byDate = tab === "date", byExam = tab === "exam";
   const keyOf = p => { const it = p.lead.it;
     return byDate ? (p.lead.d.lastMissAt ? ld(p.lead.d.lastMissAt) : "-")
-      : byExam ? (examNo(it) ? "回" + examNo(it) : "")
+      : byExam ? "回" + (examNo(it) || "-")
       : it.exam ? "回" + (examNo(it) || "-")
       : (QB_SUBJECTS[it.subjectCode] ? it.subjectCode : ""); };
   for (const p of pages) { const k = keyOf(p); if (!g.has(k)) g.set(k, []); g.get(k).push(p); }
   const keys = byDate ? [...g.keys()].sort().reverse()
     : [...QB_SUBJECT_ORDER.filter(k => g.has(k)), ...[...g.keys()].filter(k => k.startsWith("回")).sort((a, b) => b.slice(1) - a.slice(1)), ...(g.has("") ? [""] : [])];
-  const label = k => byDate ? k : k.startsWith("回") ? (byExam ? "" : "年度別 ") + "第" + k.slice(1) + "回" : byExam ? "回の無い問題（QBオリジナルなど）" : QB.subjectLabel(k);
+  const label = k => byDate ? k : k.startsWith("回") ? (byExam ? "" : "年度別 ") + "第" + k.slice(1) + "回" : QB.subjectLabel(k);
   const one = keys.length === 1;
   return keys.map(k => { const gk = tab + ":" + k, n = g.get(k).reduce((s, p) => s + p.picked.length, 0);
     return `<details class="grp" data-gk="${esc(gk)}"${one || openGroups.has(gk) ? " open" : ""}><summary class="subj">${esc(label(k))}<span>${n}問</span></summary>`
