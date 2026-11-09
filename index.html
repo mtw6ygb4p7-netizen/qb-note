@@ -90,6 +90,23 @@ details.grp>summary.subj>span{margin-left:auto;font-size:12px;color:var(--sub);f
 .judge .note{font-weight:400;font-size:13px;color:var(--sub)}
 .nav{display:flex;justify-content:space-between;gap:8px;margin-top:12px}
 .nav button{padding:10px 18px}
+.pill.ok{color:var(--ok)}
+.chip{display:inline-flex;align-items:center;gap:2px;border:1px solid var(--accent);color:var(--accent);border-radius:999px;padding:0 10px;font-size:12px;background:transparent}
+.chip.pick{cursor:pointer;padding:3px 12px;font-size:13px}
+.chip.pick[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink)}
+.chip .x{border:0;background:transparent;color:inherit;padding:0 0 0 4px;font-size:14px;line-height:1}
+.tags{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px}
+.tags input{font:inherit;font-size:16px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:4px 8px;width:9em}
+.tags>button:not(.chip){padding:4px 10px}
+.tagbar{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 8px}
+.note{font-size:13px;color:var(--sub)}
+.subq{border-top:1px solid var(--line);margin-top:12px;padding-top:10px}
+.subq.done .choice{opacity:.85}
+.acts{margin-top:10px;display:flex;gap:8px}
+.acts button{font-size:13px;padding:4px 10px}
+.resume{display:flex;flex-wrap:wrap;gap:8px;align-items:center;background:var(--soft);border:1px solid var(--accent);border-radius:10px;padding:10px 12px;margin:10px 0}
+.resume span{flex:1;min-width:200px}
+.nav button[disabled]{opacity:.4;cursor:default}
 .toast{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));max-width:560px;margin:0 auto;background:var(--ink);color:var(--bg);
   border-radius:10px;padding:10px 14px;font-size:14px;box-shadow:0 4px 16px rgba(0,0,0,.25)}
 </style>
@@ -124,11 +141,14 @@ details.grp>summary.subj>span{margin-left:auto;font-size:12px;color:var(--sub);f
   <div class="stats" id="stats"></div>
 
   <div id="listView">
+    <div class="resume" id="resume" hidden></div>
     <div class="controls">
       <div class="seg" id="tabs" role="group" aria-label="表示">
         <button data-tab="today" aria-pressed="false">今日間違えた</button>
         <button data-tab="subject" aria-pressed="false">科目別</button>
+        <button data-tab="exam" aria-pressed="false">回数別</button>
         <button data-tab="date" aria-pressed="false">日付別</button>
+        <button data-tab="tag" aria-pressed="false">タグ</button>
         <button data-tab="cleared" aria-pressed="false">克服済み</button>
       </div>
     </div>
@@ -146,6 +166,7 @@ details.grp>summary.subj>span{margin-left:auto;font-size:12px;color:var(--sub);f
       <button id="openAll">すべて開く</button>
       <button id="closeAll">すべて閉じる</button>
     </div>
+    <div class="tagbar" id="tagBar" hidden></div>
     <div id="list"></div>
   </div>
   <div id="reviewView" hidden></div>

@@ -129,6 +129,74 @@ const QB = {
   // 「必小」→ { code: "小", required: true }
   splitSubject: (raw) => (String(raw || "").startsWith("必") ? { code: raw.slice(1), required: true } : { code: raw || "", required: false }),
 
+  // ---- 連問（1つの前文に小問が複数）----
+  // 小問のIDは「<親id>_A93」。同じ親の小問は1つのまとまりとして、1ページにまとめて出す
+  seriesKey: (it) => it.seriesId || (String(it.id || "").match(/^(.+)_[A-Z]+\d+$/) || [])[1] || it.id,
+  isSeries: (it) => !!it.seriesId || /_[A-Z]+\d+$/.test(String(it.id || "")),
+  // 「前文\n\n[A93] 小問の文」→ { pre, tag, body }（連問でなければ pre は空）
+  splitText(text) {
+    const m = String(text || "").match(/^([\s\S]*?)\n\n\[([A-Z]+\d+)\] ([\s\S]*)$/);
+    return m ? { pre: m[1], tag: m[2], body: m[3] } : { pre: "", tag: "", body: String(text || "") };
+  },
+  // 問題の画像と解説の画像。以前の記録（cv が無い）は両方が images に入っているので、
+  // 問題文が図・写真などを指していなければ解説の画像とみなす（取り込み時に QB から読み直すと正しく分かれる）
+  imagesOf(it) {
+    if (it.cv >= 2 || it.expImages) return { q: it.images || [], exp: it.expImages || [] };
+    const refers = /図|写真|画像|グラフ|表|心電図|波形|示す|別に示|エックス線|X線|CT|MRI|エコー|超音波/.test(it.text || "");
+    return refers ? { q: it.images || [], exp: [] } : { q: [], exp: it.images || [] };
+  },
+
+  // ---- 同期の操作（タグ・削除・一覧に戻す）----
+  // 端末ごとの記録ファイル（records/<端末>.json）に ops として残し、PCの拡張機能が取り込む。
+  // Anki と同じく、項目ごとに「後から変えた方が勝つ」（at の新しい方）。解いた記録（attempts）は key でまとめるだけなので食い違わない。
+  //   {key, qid, op: "tags", tags: [..], at}   タグをこの内容にする（tagsAt より新しいときだけ）
+  //   {key, qid, op: "reset", at}             at までの○・◎を「−」にして、克服済みから一覧に戻す
+  //   {key, qid, op: "delete", at}            削除（at より後にまた解いた記録があれば消さない）
+  applyOps(it, ops) {
+    let out = it;
+    for (const o of [...(ops || [])].sort((a, b) => (a.at < b.at ? -1 : 1))) {
+      if (!out) break;
+      if (o.op === "tags") {
+        if (!out.tagsAt || o.at > out.tagsAt) out = { ...out, tags: [...(o.tags || [])], tagsAt: o.at };
+      } else if (o.op === "reset") {
+        if ((out.attempts || []).some((t) => t.at <= o.at && QB.isCorrect(t.judge)))
+          out = { ...out, attempts: out.attempts.map((t) => (t.at <= o.at && QB.isCorrect(t.judge) ? { ...t, judge: "−" } : t)) };
+      } else if (o.op === "delete") {
+        if (!(out.attempts || []).some((t) => t.at > o.at)) out = null;
+      }
+    }
+    return out;
+  },
+
+  // 保存済みの記録の手直し（以前はノート画面を開いたときに行っていたもの。今は同期の前に background で行う）
+  //  ・「_A093」→「_A93」にまとめ直す／科目別にもある問題は回数別から科目別へ合流
+  //  ・科目の記号が無い問題を overrides（{id: 記号}）で補う
+  //  ・「必小」→ 科目「小」＋必修の印／科目の無い国試の問題（取り込みで科目別に入った分）は年度別へ
+  maintain(items, examItems, overrides = {}) {
+    let changed = QB.fixSubIds(items) | QB.fixSubIds(examItems);
+    for (const id of Object.keys(examItems)) {
+      if (items[id]) { items[id] = QB.merge(examItems[id], items[id]); delete examItems[id]; changed = true; }
+    }
+    for (const [id, code] of Object.entries(overrides)) {
+      if (items[id] && !items[id].subjectCode) { items[id].subjectCode = code; changed = true; }
+    }
+    for (const store of [items, examItems]) {
+      for (const it of Object.values(store)) {
+        const sp = QB.splitSubject(it.subjectCode);
+        if (sp.required && it.subjectCode !== sp.code) { it.subjectCode = sp.code; changed = true; }
+        if (!it.required && (sp.required || QB.isRequiredLabel(it.label))) { it.required = true; changed = true; }
+      }
+    }
+    for (const [id, it] of Object.entries(items)) {
+      const no = (String(it.label || "").match(/^(\d{2,3})[AP]\d+$/) || [])[1];
+      if (QB_SUBJECTS[it.subjectCode] || !no) continue;
+      examItems[id] = examItems[id] ? QB.merge(examItems[id], it) : { ...it, examVersion: it.examVersion || no };
+      delete items[id];
+      changed = true;
+    }
+    return !!changed;
+  },
+
   localDate(iso) {
     const d = new Date(iso);
     return d.getFullYear() + "/" + String(d.getMonth() + 1).padStart(2, "0") + "/" + String(d.getDate()).padStart(2, "0");
