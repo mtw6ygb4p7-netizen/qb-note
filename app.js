@@ -568,6 +568,8 @@ function onExtStatus(c, g) {
   if (c.error) { catchupReq = 0; btn.disabled = false; toast("取り込めませんでした：" + c.error); return; }
   if (!c.recorded) { catchupReq = 0; btn.disabled = false; toast("QBに新しい解答はありませんでした"); return; }
   if (!(g.at >= c.finishedAt)) { line.textContent = `QBから${c.recorded}件取り込みました。アプリへ送っています…`; return; }
+  // 送るのに失敗したとき：拡張機能が1分後にやり直すので、そのまま待つ（次の状態の知らせでもう一度ここに来る）
+  if (g.ok === false) { line.textContent = `QBから${c.recorded}件取り込みました。アプリへの送信に失敗（${g.error}）。1分後にやり直します…`; return; }
   catchupReq = 0; btn.disabled = false;
   const go = () => syncing ? setTimeout(go, 2000) : sync(false);
   go();
