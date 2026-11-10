@@ -92,8 +92,13 @@ const pickTab = (t, all, day) => t === "review" ? all.filter(r => r.d.missToday)
 const tabName = t => ({ review: "今日の復習", due: "総復習", today: "今日間違えた", subject: "科目別", exam: "年度別", date: "日付別", tag: "タグ「" + curTag + "」", leech: "苦手", cleared: "克服済み" }[t] || "");
 
 const subNo = it => Number((String(it.label || "").match(/(\d+)$/) || [])[1] || 0);
+// 今日の復習が済んだか：今日×・△になった問題を、そのあとアプリで解き直した（臨時の演習の記録がある）。
+// 復習の予定（はしご）は変えない。今日の復習の残りの数を減らし、一覧の後ろに回すためだけに使う
+const revDone = d => d.missToday && d.attempts.some(t => t.free && t.judge && QB.dayKey(t.at) === today() && (!d.lastMissAt || t.at > d.lastMissAt));
+const revTab = () => tab === "review" || tab === "today";
+const pageRevDone = p => p.picked.every(r => r.rv);
 function view() {
-  const every = allItems().map(it => ({ it, d: QB.derive(it) }));
+  const every = allItems().map(it => { const d = QB.derive(it); return { it, d, rv: revDone(d) }; });
   // 連問のまとまり（○の小問＝companion も含む）
   const byKey = new Map();
   for (const r of every) { const k = QB.seriesKey(r.it); if (!byKey.has(k)) byKey.set(k, []); byKey.get(k).push(r); }
@@ -103,7 +108,7 @@ function view() {
   // 総復習の並び：まだ解いていない → 遅れが長い → 直近が× → 必修
   if (tab === "due") pick.sort((a, b) => a.d.doneToday - b.d.doneToday || (a.d.dueBefore < b.d.dueBefore ? -1 : a.d.dueBefore > b.d.dueBefore ? 1 : 0)
     || (b.d.lastMissJudge === "×") - (a.d.lastMissJudge === "×") || !!b.it.required - !!a.it.required);
-  else pick.sort(SORTS[$("sort").value]);
+  else pick.sort((a, b) => (revTab() ? a.rv - b.rv : 0) || SORTS[$("sort").value](a, b)); // 今日の復習：済んだ問題は後ろへ
   return { all, pick, byKey };
 }
 // 一覧の問題 → ページ（連問は1ページにまとめる。小問は全部入れる）
@@ -157,10 +162,10 @@ function card(p) {
   }).join("");
   const lead = p.lead;
   return `<article class="item" data-key="${esc(p.key)}"><div class="top"><span class="qid">${esc(pageLabel(p))}</span>
-    ${lead.it.required ? '<span class="pill due">必修</span>' : ""}${series ? '<span class="pill">連問</span>' : statusPills(lead)}
+    ${revTab() && pageRevDone(p) ? '<span class="pill done">今日の復習 済み</span>' : ""}${lead.it.required ? '<span class="pill due">必修</span>' : ""}${series ? '<span class="pill">連問</span>' : statusPills(lead)}
     ${series ? "" : `<span>最終 ${lead.d.lastMissAt ? ld(lead.d.lastMissAt) : "-"}</span>`}${tagChips(tagsOfPage(p))}</div>
     ${series ? `<div class="q">${esc(pre)}</div>` : ""}${imgTags(qImgs)}${subs}
-    <div class="acts"><button data-act="del">削除</button>${p.members.some(m => m.d.cleared) ? '<button data-act="back">一覧に戻す</button>' : ""}${p.members.some(m => m.d.leech) ? '<button data-act="unleech">苦手から外す</button>' : ""}</div></article>`;
+    <div class="acts"><button class="go" data-act="solve">この問題を解く</button><button data-act="del">削除</button>${p.members.some(m => m.d.cleared) ? '<button data-act="back">一覧に戻す</button>' : ""}${p.members.some(m => m.d.leech) ? '<button data-act="unleech">苦手から外す</button>' : ""}</div></article>`;
 }
 
 // まとめ方：科目別（QBの分野順 → 年度別 → 未分類）／回数別（新しい回から）／日付別（最後に間違えた日、新しい順）
@@ -181,7 +186,10 @@ function grouped(pages) {
   const one = keys.length === 1;
   return keys.map(k => { const gk = tab + ":" + k, n = g.get(k).reduce((s, p) => s + p.picked.length, 0);
     // 見出しの「この中を解く」：その見出しの問題だけで臨時の演習（総復習のタブでは総復習として数える）
-    return `<details class="grp" data-gk="${esc(gk)}"${one || openGroups.has(gk) ? " open" : ""}><summary class="subj">${esc(label(k))}<span>${n}問</span>`
+    // 今日の復習・今日間違えた：まだ復習していない数（残り）も出す
+    const rest = g.get(k).reduce((s, p) => s + p.picked.filter(r => !r.rv).length, 0);
+    const cnt = revTab() ? (rest ? `残り${rest}／${n}問` : `${n}問・済み`) : `${n}問`;
+    return `<details class="grp" data-gk="${esc(gk)}"${one || openGroups.has(gk) ? " open" : ""}><summary class="subj">${esc(label(k))}<span>${cnt}</span>`
       + `<button class="grpgo" data-grp="${esc(k)}" data-gname="${esc(label(k))}">この中を解く</button></summary>`
       + g.get(k).map(card).join("") + `</details>`; }).join("");
 }
@@ -225,12 +233,12 @@ function render() {
   const day = today();
   const active = all.filter(r => !r.d.cleared).length;
   const set = all.filter(r => r.d.inToday && !r.d.missToday), done = set.filter(r => r.d.doneToday).length;
-  const newToday = all.filter(r => r.d.missToday).length;
+  const newToday = all.filter(r => r.d.missToday && !r.rv).length, revDoneN = all.filter(r => r.rv).length; // 今日の復習の残り／済み
   const soon = n => all.filter(r => !r.d.cleared && r.d.due && r.d.due > day && r.d.due <= QB.addDays(day, n)).length;
-  $("stats").innerHTML = `<span><b>${newToday}</b>問 今日の復習</span><span><b>${set.length - done}</b>問 総復習の残り（済み${done}）</span><span><b>${soon(1)}</b>問 明日</span><span><b>${soon(7)}</b>問 7日以内</span><span><b>${active}</b>問 要復習</span><span><b>${all.length - active}</b>問 克服済み</span>`;
+  $("stats").innerHTML = `<span><b>${newToday}</b>問 今日の復習の残り（済み${revDoneN}）</span><span><b>${set.length - done}</b>問 総復習の残り（済み${done}）</span><span><b>${soon(1)}</b>問 明日</span><span><b>${soon(7)}</b>問 7日以内</span><span><b>${active}</b>問 要復習</span><span><b>${all.length - active}</b>問 克服済み</span>`;
   $("reviewTab").setAttribute("aria-pressed", String(tab === "review"));
   $("dueTab").setAttribute("aria-pressed", String(tab === "due"));
-  $("reviewTab").textContent = `今日の復習（${newToday}問）`;
+  $("reviewTab").textContent = `今日の復習（残り${newToday}問）`;
   $("dueTab").textContent = `総復習を始める（残り${set.length - done}問）`;
   $("start").textContent = tab === "due" ? "1問ずつ解く（復習の予定に反映）" : "1問ずつ解く（臨時・復習の予定には反映しない）";
   const ldToday = ld(new Date().toISOString());
@@ -276,10 +284,12 @@ function renderResume() {
 }
 // 演習の結果が復習の予定（はしご）に効くのは「総復習を始める」から解いたときだけ。ほかは臨時の演習（free）
 // grp：見出し（科目・回・日付）の key。指定すると、その見出しの問題だけを解く
-function startSession(grp, gname) {
+// one：ページの key。指定すると、その問題（連問は1ページ）だけを解く
+function startSession(grp, gname, one) {
   const { pick, byKey } = view();
   let pages = pagesOf(pick, byKey);
   if (grp !== undefined) pages = pages.filter(p => grpKeyOf(p) === grp);
+  if (one !== undefined) pages = pages.filter(p => p.key === one);
   if (!pages.length) return;
   if (ses && !confirm(`途中の演習（${ses.name} ${ses.pos + 1}/${ses.keys.length}）があります。やめて新しく始めますか？`)) return;
   const free = tab !== "due";
@@ -676,6 +686,7 @@ $("list").addEventListener("click", e => {
   const b = e.target.closest("[data-act]");
   if (!b) return;
   const key = b.closest(".item").dataset.key, members = view().byKey.get(key) || [];
+  if (b.dataset.act === "solve") { startSession(undefined, members.length ? pageLabel({ members, lead: members[0] }) : "", key); return; }
   if (b.dataset.act === "del") {
     if (!confirm("この問題を記録から削除しますか？（このあとQBでまた間違えると、もう一度登録されます）")) return;
     addOps(members.map(m => m.it.id), "delete");
