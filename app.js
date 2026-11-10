@@ -112,7 +112,7 @@ const revDone = d => d.missToday && d.attempts.some(t => t.free && t.judge && QB
 const revTab = () => tab === "review" || tab === "today";
 // 今日間違えた：QBで間違えたか（総復習で間違えたものと分ける。2026-11-10〜）。
 // QBの記録（拡張機能が画面・取り込みで記録した分）には src が無い。アプリで解いた記録には src（端末名）がある
-const qbMissToday = d => d.attempts.some(t => !t.src && !t.free && QB.isMiss(t.judge) && QB.dayKey(t.at) === today());
+const missTodayBy = (d, fromApp) => d.attempts.some(t => !!t.src === fromApp && !t.free && QB.isMiss(t.judge) && QB.dayKey(t.at) === today());
 const pageRevDone = p => p.picked.every(r => r.rv);
 function view() {
   const every = allItems().map(it => { const d = QB.derive(it); return { it, d, s: QB.stats(d.attempts), rv: revDone(d) }; });
@@ -122,7 +122,8 @@ function view() {
   for (const g of byKey.values()) g.sort((a, b) => subNo(a.it) - subNo(b.it));
   const all = every.filter(r => r.d.miss > 0);
   let pick = pickTab(tab, all, ld(new Date().toISOString())).filter(FILTERS[$("filter").value] || FILTERS.all);
-  if (tab === "today" && $("todaySrc").value === "qb") pick = pick.filter(r => qbMissToday(r.d)); // 1問ずつ解く・見出しから解くも、この範囲だけ
+  const src = $("todaySrc").value; // qb：QBで間違えた問題だけ／due：総復習で間違えた問題だけ（アプリの記録で、臨時の演習ではないもの）
+  if (tab === "today" && (src === "qb" || src === "due")) pick = pick.filter(r => missTodayBy(r.d, src === "due")); // 1問ずつ解く・見出しから解くも、この範囲だけ
   // 総復習の並び：まだ解いていない → 遅れが長い → 直近が× → 必修
   if (tab === "due") pick.sort((a, b) => a.d.doneToday - b.d.doneToday || (a.d.dueBefore < b.d.dueBefore ? -1 : a.d.dueBefore > b.d.dueBefore ? 1 : 0)
     || (b.d.lastMissJudge === "×") - (a.d.lastMissJudge === "×") || !!b.it.required - !!a.it.required);
