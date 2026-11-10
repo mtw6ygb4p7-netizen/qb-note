@@ -41,7 +41,9 @@ h1{font-size:22px;margin:0;letter-spacing:.02em}
 .sync .row button{flex:1;min-width:140px}
 .sync .row input{flex:2;min-width:180px;font:inherit;font-size:16px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:7px 10px}
 .sync details summary{font-size:13px;margin-top:8px}
-#syncBtn{padding:10px 14px}
+#recvBtn,#sendBtn{padding:10px 14px}
+.pcbox{border-top:1px dashed var(--line);margin-top:10px;padding-top:8px}
+.pcbox b{color:var(--ink);font-size:13px}
 .pend{color:var(--tri);font-weight:700}
 .stats{display:flex;flex-wrap:wrap;gap:8px 18px;margin:14px 0 6px;font-variant-numeric:tabular-nums}
 .stats b{font-size:20px;margin-right:2px}
@@ -133,10 +135,20 @@ details.grp>summary.subj>span{margin-left:auto;font-size:12px;color:var(--sub);f
     <div id="recLine"></div>
     <div id="syncLine"></div>
     <div class="row">
-      <button class="go" id="syncBtn">同期</button>
-      <button id="catchupBtn" hidden title="iPad・スマホで解いた分を、QBのサーバーから今すぐ取り込みます（PCのEdgeで、拡張機能が入っているときだけ）">QBから取り込み</button>
+      <button class="go" id="recvBtn" title="サーバーにある最新の問題データ・ほかの端末の記録・画像を、この端末に受け取ります">サーバーから受け取る</button>
+      <button id="sendBtn" title="この端末で解いた記録・タグなどの操作を、サーバーへ送ります">この端末の記録をサーバーへ送る</button>
     </div>
-    <div id="catchupLine" hidden></div>
+    <div id="pcBox" class="pcbox" hidden>
+      <b>PC（拡張機能）</b>
+      <div class="row">
+        <button id="catchupBtn" title="iPad・スマホのQBで解いた分を、QBのサーバーからPCの拡張機能に取り込みます">① QB → PC 取り込み</button>
+        <button id="pcPullBtn" title="アプリ（iPad・iPhoneなど）で解いてサーバーに送った記録を、PCの拡張機能に取り込みます">② サーバー → PC 記録を取り込む</button>
+        <button id="pcPushBtn" title="PCの拡張機能のデータ（問題と記録）を、サーバーの data.json に置きます">③ PC → サーバー 送る</button>
+      </div>
+      <div id="catchupLine"></div>
+      <div id="pcLine"></div>
+      <div id="pcPend" class="pend" hidden>PCに、サーバーへ送っていない変更があります（③で送ります）</div>
+    </div>
     <details id="syncSet">
       <summary>同期の設定</summary>
       <div class="row">
