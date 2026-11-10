@@ -135,19 +135,13 @@ details.grp>summary.subj>span{margin-left:auto;font-size:12px;color:var(--sub);f
     <div id="recLine"></div>
     <div id="syncLine"></div>
     <div class="row">
-      <button class="go" id="recvBtn" title="サーバーにある最新の問題データ・ほかの端末の記録・画像を、この端末に受け取ります">サーバーから受け取る</button>
-      <button id="sendBtn" title="この端末で解いた記録・タグなどの操作を、サーバーへ送ります">この端末の記録をサーバーへ送る</button>
+      <button id="catchupBtn" hidden title="iPad・スマホのQBで解いた分を、QBのサーバーからPCに読み込みます（PCのEdgeで拡張機能が入っているときだけ出ます）">QBからデータを読み込む</button>
+      <button class="go" id="syncBtn" title="この端末の記録を送り、最新の問題データ・ほかの端末の記録・画像を受け取ります（PCでは拡張機能のデータもまとめて送ります）">同期する</button>
     </div>
     <div id="pcBox" class="pcbox" hidden>
-      <b>PC（拡張機能）</b>
-      <div class="row">
-        <button id="catchupBtn" title="iPad・スマホのQBで解いた分を、QBのサーバーからPCの拡張機能に取り込みます">① QB → PC 取り込み</button>
-        <button id="pcPullBtn" title="アプリ（iPad・iPhoneなど）で解いてサーバーに送った記録を、PCの拡張機能に取り込みます">② サーバー → PC 記録を取り込む</button>
-        <button id="pcPushBtn" title="PCの拡張機能のデータ（問題と記録）を、サーバーの data.json に置きます">③ PC → サーバー 送る</button>
-      </div>
       <div id="catchupLine"></div>
       <div id="pcLine"></div>
-      <div id="pcPend" class="pend" hidden>PCに、サーバーへ送っていない変更があります（③で送ります）</div>
+      <div id="pcPend" class="pend" hidden>PCに、まだ同期していない変更があります（「同期する」で送ります）</div>
     </div>
     <details id="syncSet">
       <summary>同期の設定</summary>

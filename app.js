@@ -186,15 +186,15 @@ function syncLines() {
   const n = Object.keys(data.items || {}).length + Object.keys(data.examItems || {}).length;
   $("dataLine").textContent = !ready ? "読み込み中…" : data.exportedAt
     ? `問題データ：${new Date(data.exportedAt).toLocaleString("ja-JP")} にPCで作成（${n}問）` + (navigator.onLine === false ? "・オフライン" : "")
-    : "問題データがまだありません。「サーバーから受け取る」を押してください。";
+    : "問題データがまだありません。「同期する」を押してください。";
   const ex = new Set(local.exported), notYet = local.attempts.filter(t => !ex.has(t.key)).length + local.ops.filter(o => !ex.has(o.key)).length;
-  $("recLine").innerHTML = notYet ? `<span class="pend">サーバーへ送っていない記録 ${notYet}件</span>（「この端末の記録をサーバーへ送る」で送ります）`
-    : local.dirty ? '<span class="pend">サーバーへ送っていない変更があります</span>' : "";
-  // 通信は自動では行わない。最後に受け取った・送った時刻を出す
-  const when = (at, err) => at ? new Date(at).toLocaleString("ja-JP") + (err ? "（失敗：" + err + "）" : "") : "まだ";
-  $("syncLine").textContent = syncing === "recv" ? "サーバーから受け取り中…" : syncing === "send" ? "サーバーへ送信中…"
+  $("recLine").innerHTML = notYet ? `<span class="pend">まだ同期していない記録 ${notYet}件</span>（「同期する」で送ります）`
+    : local.dirty ? '<span class="pend">まだ同期していない変更があります</span>' : "";
+  // 通信は自動では行わない（「同期する」を押したときだけ）。最後に同期した時刻を出す
+  const at = gh.syncAt || gh.recvAt || gh.lastAt;
+  $("syncLine").textContent = syncing ? syncing
     : !gh.token ? "同期の設定がまだです（下の「同期の設定」）"
-    : `最後に受け取った：${when(gh.recvAt || gh.lastAt, gh.recvError)}　最後に送った：${when(gh.sendAt, gh.sendError)}`;
+    : "最後に同期：" + (at ? new Date(at).toLocaleString("ja-JP") + (gh.syncError ? "（失敗：" + gh.syncError + "）" : "") : "まだ");
 }
 
 function renderTagBar(all) {
@@ -410,7 +410,7 @@ function recordAttempt(it, st) {
   if (now && now.leech && !(was && was.leech)) toast(`${it.label}：×・△が${now.missDays}日目です。定着しにくい問題として「苦手」に入れました`);
   persistLocal();
 }
-function persistLocal() { // 端末の中に保存するだけ。サーバーへ送るのは「この端末の記録をサーバーへ送る」を押したとき
+function persistLocal() { // 端末の中に保存するだけ。サーバーへ送るのは「同期する」を押したとき
   local.dirty = true;
   kvSet({ local }).catch(e => toast("記録を保存できませんでした（" + (e && e.message || e) + "）"));
 }
@@ -479,7 +479,7 @@ $("exportBtn").onclick = async () => {
 };
 
 // ---- 同期（GitHub の非公開リポジトリ）----
-// gh：{token, repo, device, lastAt, lastError}（端末の中だけに保存）
+// gh：{token, repo, device, syncAt, syncError}（端末の中だけに保存）
 let gh = {}, syncing = false;
 const b64 = text => { const b = new TextEncoder().encode(text); let s = ""; for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000)); return btoa(s); };
 async function ghApi(path, opts = {}) {
@@ -491,105 +491,119 @@ async function ghApi(path, opts = {}) {
 }
 const blobToDataUrl = b => new Promise((ok, no) => { const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.onerror = () => no(fr.error); fr.readAsDataURL(b); });
 const inPractice = () => !$("reviewView").hidden;
-// 通信は、ボタンを押したときだけ（2026-11-10〜。開いたとき・解いたあと・3分ごとなどの自動の同期はしない）
-//   send   ：この端末 → サーバー（この端末の記録と操作を records/<端末>.json に置く）
-//   receive：サーバー → この端末（data.json・ほかの端末の記録・画像を受け取る）
+// 通信は「同期する」を押したときだけ（Ankiの同期と同じ。開いたとき・解いたあと・定期などの自動の同期はしない）
+//   1. この端末 → サーバー（この端末の記録と操作を records/<端末>.json に置く）
+//   2. PCで拡張機能があるとき：拡張機能が records/ を取り込み、PCの問題と記録・画像を data.json・images/ に置く
+//   3. サーバー → この端末（data.json・ほかの端末の記録・画像を受け取る）
 function ghReady() {
   if (!gh.token || !gh.repo) { $("syncSet").open = true; toast("先に「同期の設定」で合鍵を保存してください"); return false; }
-  if (navigator.onLine === false) { toast("オフラインのため通信できません（解いた記録は端末に残っています）"); return false; }
+  if (navigator.onLine === false) { toast("オフラインのため同期できません（解いた記録は端末に残っています）"); return false; }
   return !syncing;
 }
-async function ghRun(what, fn) {
-  syncing = what; if (!inPractice()) render();
-  try { await fn(); gh[what + "At"] = Date.now(); gh[what + "Error"] = ""; }
-  catch (e) { gh[what + "At"] = Date.now(); gh[what + "Error"] = String(e && e.message || e); toast((what === "send" ? "送れませんでした：" : "受け取れませんでした：") + gh[what + "Error"]); }
-  finally { syncing = false; try { await kvSet({ gh }); } catch (e) {} if (!inPractice()) render(); }
+const step = t => { syncing = t; if (!inPractice()) syncLines(); };
+// この端末の記録と操作を送る（端末ごとに1ファイル。PCに入った分は、次に問題を受け取ったとき端末から外れる）。送った件数、変更が無ければ -1
+async function sendRecords() {
+  const path = "records/" + gh.device + ".json", sig = sigOf();
+  if (sig === local.sentSig) return -1;
+  const cur = await ghApi(path);
+  await ghApi(path, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+    message: "記録 " + gh.device, ...(cur && cur.sha ? { sha: cur.sha } : {}),
+    content: b64(JSON.stringify({ device: gh.device, updatedAt: new Date().toISOString(), attempts: local.attempts, ops: local.ops })) }) });
+  const ex = new Set(local.exported), sent = local.attempts.filter(t => !ex.has(t.key)).length + local.ops.filter(o => !ex.has(o.key)).length;
+  local.exported = [...local.attempts.map(t => t.key), ...local.ops.map(o => o.key)];
+  local.sentSig = sig; local.dirty = false;
+  await kvSet({ local });
+  return sent;
 }
-async function send() {
+// 最新の問題・ほかの端末の記録・画像を受け取る
+async function receiveAll() {
+  let got = 0;
+  const r = await ghApi("data.json", { raw: true });
+  if (r) {
+    const obj = await r.json();
+    if (obj.exportedAt !== data.exportedAt) got = (await importData(obj)).n;
+  }
+  // ほかの端末の記録（PCがまだまとめていない分も、すぐ見えるように）
+  const list = await ghApi("records");
+  if (Array.isArray(list)) {
+    const names = new Set();
+    for (const f of list.filter(f => f.type === "file" && f.name.endsWith(".json") && f.name !== gh.device + ".json")) {
+      names.add(f.name);
+      if (others[f.name] && others[f.name].sha === f.sha) continue;
+      const o = await (await ghApi("records/" + f.name, { raw: true })).json();
+      others[f.name] = { sha: f.sha, attempts: o.attempts || [], ops: o.ops || [] };
+    }
+    for (const k of Object.keys(others)) if (!names.has(k)) delete others[k];
+    await kvSet({ others });
+  }
+  // まだ端末に無い画像（問題の画像と解説の画像）
+  let imgs = 0;
+  for (const it of allItems()) for (const u of [...(it.images || []), ...(it.expImages || [])]) {
+    if (images[u]) continue;
+    const ir = await ghApi("images/" + u.split("/").pop(), { raw: true });
+    if (!ir) continue; // PCがまだ置いていない
+    images[u] = await blobToDataUrl(await ir.blob()); imgs++;
+  }
+  if (imgs) await kvSet({ images });
+  return { got, imgs };
+}
+async function syncAll() {
   if (!ghReady()) return;
-  await ghRun("send", async () => {
-    // この端末の記録と操作を送る（端末ごとに1ファイル。PCに入った分は、次に問題を受け取ったとき端末から外れる）
-    let sent = 0;
-    const path = "records/" + gh.device + ".json", sig = sigOf(), changed = sig !== local.sentSig;
-    if (changed) {
-      const cur = await ghApi(path);
-      await ghApi(path, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
-        message: "記録 " + gh.device, ...(cur && cur.sha ? { sha: cur.sha } : {}),
-        content: b64(JSON.stringify({ device: gh.device, updatedAt: new Date().toISOString(), attempts: local.attempts, ops: local.ops })) }) });
-      const ex = new Set(local.exported); sent = local.attempts.filter(t => !ex.has(t.key)).length + local.ops.filter(o => !ex.has(o.key)).length;
-      local.exported = [...local.attempts.map(t => t.key), ...local.ops.map(o => o.key)];
-      local.sentSig = sig; local.dirty = false;
-      await kvSet({ local });
+  if (extBusy) { toast("QBからの読み込み中です。終わってから同期してください"); return; }
+  $("syncBtn").disabled = true;
+  if (ext) $("catchupBtn").disabled = true;
+  try {
+    step("同期中…（この端末の記録を送っています）");
+    const sent = await sendRecords();
+    let pc = null;
+    if (ext) { // PC：拡張機能のデータ（QBで記録した分）をサーバーへ
+      step("同期中…（PCのデータをまとめています）");
+      pc = await extRequest("ghSync");
+      if (!pc.ok) throw new Error("PCのデータを送れませんでした：" + (pc.error || ""));
     }
-    toast(!changed ? "送っていない記録はありません" : sent ? `この端末の記録${sent}件をサーバーへ送りました` : "この端末の変更（判定の直しなど）をサーバーへ送りました");
-  });
+    step("同期中…（最新のデータを受け取っています）");
+    const { got, imgs } = await receiveAll();
+    gh.syncAt = Date.now(); gh.syncError = "";
+    const parts = [];
+    if (sent > 0) parts.push(`記録${sent}件を送信`);
+    if (pc && pc.pulled) parts.push(`PCに記録${pc.pulled}件`);
+    if (pc && pc.images) parts.push(`画像${pc.images}枚を送信`);
+    parts.push(got ? `問題データ ${got}問を受信` : "問題データは前回と同じ");
+    if (imgs) parts.push(`画像${imgs}枚を受信`);
+    toast("同期しました（" + parts.join("・") + "）");
+  } catch (e) {
+    gh.syncAt = Date.now(); gh.syncError = String(e && e.message || e);
+    toast("同期できませんでした：" + gh.syncError);
+  } finally {
+    syncing = false;
+    $("syncBtn").disabled = false;
+    try { await kvSet({ gh }); } catch (e) {}
+    if (ext) extPost({ type: "hello" }); // ボタンの状態を戻す
+    if (!inPractice()) render();
+  }
 }
-async function receive() {
-  if (!ghReady()) return;
-  await ghRun("recv", async () => {
-    // 1. 最新の問題を受け取る
-    let got = 0;
-    const r = await ghApi("data.json", { raw: true });
-    if (r) {
-      const obj = await r.json();
-      if (obj.exportedAt !== data.exportedAt) got = (await importData(obj)).n;
-    }
-    // 2. ほかの端末の記録を受け取る（PCがまだまとめていない分も、すぐ見えるように）
-    const list = await ghApi("records");
-    if (Array.isArray(list)) {
-      const names = new Set();
-      for (const f of list.filter(f => f.type === "file" && f.name.endsWith(".json") && f.name !== gh.device + ".json")) {
-        names.add(f.name);
-        if (others[f.name] && others[f.name].sha === f.sha) continue;
-        const o = await (await ghApi("records/" + f.name, { raw: true })).json();
-        others[f.name] = { sha: f.sha, attempts: o.attempts || [], ops: o.ops || [] };
-      }
-      for (const k of Object.keys(others)) if (!names.has(k)) delete others[k];
-      await kvSet({ others });
-    }
-    // 3. まだ端末に無い画像を受け取る（問題の画像と解説の画像）
-    let imgs = 0;
-    for (const it of allItems()) for (const u of [...(it.images || []), ...(it.expImages || [])]) {
-      if (images[u]) continue;
-      const ir = await ghApi("images/" + u.split("/").pop(), { raw: true });
-      if (!ir) continue; // PCがまだ置いていない
-      images[u] = await blobToDataUrl(await ir.blob()); imgs++;
-    }
-    if (imgs) await kvSet({ images });
-    toast((got ? `サーバーから受け取りました（問題データ ${got}問` : "サーバーから受け取りました（問題データは前回と同じ") + (imgs ? `・画像${imgs}枚）` : "）"));
-  });
-}
-$("recvBtn").onclick = receive;
-$("sendBtn").onclick = send;
+$("syncBtn").onclick = syncAll;
 
-// ---- PCの拡張機能の操作（PCのEdgeで拡張機能が入っているときだけ出る。拡張機能の notebridge.js が取り次ぐ）----
-// どれも押したときだけ動く。終わっても、ほかの操作は続けて行わない（何がどこへ動いたか分かるように）
-//   QBから取り込み        ：QB → PC
-//   PCのデータをサーバーへ ：PC → サーバー（data.json・画像）
-//   サーバーの記録をPCへ   ：サーバー → PC（アプリで解いた記録を拡張機能に）
+// ---- PCの拡張機能（PCのEdgeで拡張機能が入っているときだけ。拡張機能の notebridge.js が取り次ぐ）----
+//   QBからデータを読み込む：QB → PC（押したときだけ。終わっても自動では同期しない）
+//   同期する（上）の途中で：拡張機能が records/ を取り込み、data.json・画像を置く
 const extPost = m => window.postMessage({ qbApp: true, ...m }, location.origin);
-const EXT_BTN = { catchup: "catchupBtn", ghPush: "pcPushBtn", ghPull: "pcPullBtn" };
-let extBusy = ""; // 押して結果を待っている操作
+let ext = false, extBusy = ""; // 拡張機能があるか／押して結果を待っている操作
+const extWait = {};
+const extRequest = what => new Promise(ok => {
+  extWait[what] = ok;
+  setTimeout(() => { if (extWait[what] === ok) { delete extWait[what]; ok({ ok: false, error: "拡張機能から返事がありません" }); } }, 10 * 60 * 1000);
+  extPost({ type: what });
+});
 const hm = t => new Date(t).toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
 function onExtStatus(c, g, pending) {
-  $("pcBox").hidden = false;
-  const running = c.running || extBusy;
-  for (const id of Object.values(EXT_BTN)) $(id).disabled = !!running;
-  $("catchupLine").textContent = c.running ? "QBから取り込み中…（1〜2分）"
-    : c.finishedAt ? `QB → PC：${hm(c.finishedAt)}` + (c.error ? `（失敗：${c.error}）` : `（${c.recorded || 0}件）`) : "QB → PC：まだ";
-  $("pcLine").textContent = (g.at ? `PC ⇄ サーバー：${hm(g.at)} ${g.kind === "pull" ? "サーバー → PC" : g.kind === "push" ? "PC → サーバー" : "両方"}`
-    + (g.ok === false ? `（失敗：${g.error}）` : g.kind === "pull" ? `（${g.pulled || 0}件）` : g.pushed ? "（送りました）" : "（変更なし）") : "PC ⇄ サーバー：まだ");
+  ext = true;
+  $("pcBox").hidden = false; $("catchupBtn").hidden = false;
+  $("catchupBtn").disabled = !!(c.running || extBusy || syncing);
+  $("catchupLine").textContent = c.running ? "QBから読み込み中…（1〜2分）"
+    : "QBから読み込み：" + (c.finishedAt ? hm(c.finishedAt) + (c.error ? `（失敗：${c.error}）` : `（${c.recorded || 0}件）`) : "まだ");
+  $("pcLine").textContent = "PCのデータの同期：" + (g.at ? hm(g.at) + (g.ok === false ? `（失敗：${g.error}）` : "") : "まだ");
   $("pcPend").hidden = !pending;
-}
-function onExtDone(what, r) {
-  extBusy = "";
-  if (what === "catchup") {
-    if (!r.ok) toast("取り込みを始められませんでした：" + (r.reason || ""));
-    return; // 終わったら status で知らせが来る
-  }
-  if (!r.ok) { toast((what === "ghPush" ? "サーバーへ送れませんでした：" : "PCへ取り込めませんでした：") + (r.error || "")); return; }
-  if (what === "ghPush") toast(r.pushed ? `PCのデータをサーバーへ送りました${r.images ? `（画像${r.images}枚）` : ""}。ほかの端末は「サーバーから受け取る」で見られます` : "サーバーはPCと同じでした（送る変更なし）");
-  else toast(`サーバーの記録 ${r.pulled || 0}件をPCに取り込みました`);
 }
 let lastCatchupDone = 0;
 window.addEventListener("message", e => {
@@ -598,21 +612,26 @@ window.addEventListener("message", e => {
   if (m.type === "ready") extPost({ type: "hello" });
   else if (m.type === "status") {
     const c = m.catchup || {};
-    // 押した取り込みが終わったら1回だけ知らせる
+    if (extBusy === "catchup" && !c.running && c.finishedAt > lastCatchupDone) extBusy = "";
+    // 押した読み込みが終わったら1回だけ知らせる
     if (lastCatchupDone && c.finishedAt > lastCatchupDone && !c.running) {
-      toast(c.error ? "QBから取り込めませんでした：" + c.error : c.recorded ? `QBから${c.recorded}件をPCに取り込みました（サーバーへはまだ送っていません）` : "QBに新しい解答はありませんでした");
+      toast(c.error ? "QBから読み込めませんでした：" + c.error : c.recorded ? `QBから${c.recorded}件をPCに読み込みました。「同期する」でこの画面とほかの端末に届きます` : "QBに新しい解答はありませんでした");
       lastCatchupDone = 0;
     }
     onExtStatus(c, m.gh || {}, m.pending);
-  } else if (m.type === "done") onExtDone(m.what, m.result || {});
+  } else if (m.type === "done") {
+    const r = m.result || {};
+    if (extWait[m.what]) { const ok = extWait[m.what]; delete extWait[m.what]; ok(r); }
+    else if (m.what === "catchup" && !r.ok) { extBusy = ""; lastCatchupDone = 0; toast("読み込みを始められませんでした：" + (r.reason || "")); }
+  }
 });
 extPost({ type: "hello" });
-for (const [what, id] of Object.entries(EXT_BTN)) $(id).onclick = () => {
-  if (what === "ghPush" && !confirm("PCのデータで、サーバーの問題データ（data.json）を置き換えます。よろしいですか？\n（ほかの端末の記録 records は消えません）")) return;
-  extBusy = what;
-  if (what === "catchup") { lastCatchupDone = Date.now(); toast("QBから取り込みます（1〜2分）"); }
-  for (const i of Object.values(EXT_BTN)) $(i).disabled = true;
-  extPost({ type: what });
+$("catchupBtn").onclick = () => {
+  if (syncing) return;
+  extBusy = "catchup"; lastCatchupDone = Date.now();
+  $("catchupBtn").disabled = true;
+  toast("QBから読み込みます（1〜2分）");
+  extPost({ type: "catchup" });
 };
 $("ghSave").onclick = async () => {
   const token = $("ghToken").value.trim() || gh.token, repo = $("ghRepo").value.trim();
@@ -620,7 +639,7 @@ $("ghSave").onclick = async () => {
   gh = { ...gh, token, repo };
   await kvSet({ gh });
   $("ghToken").value = ""; $("syncSet").open = false;
-  toast("保存しました。「サーバーから受け取る」で問題データを受け取れます");
+  toast("保存しました。「同期する」で問題データを受け取れます");
 };
 function showGhForm() {
   $("ghRepo").value = gh.repo || "mtw6ygb4p7-netizen/qb-note-data";
