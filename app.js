@@ -74,7 +74,19 @@ const setTab = t => { tab = t; lsSet("qb_tab", t); render(); };
 
 const SORTS = { miss: (a, b) => b.d.miss - a.d.miss || (a.d.lastMissAt < b.d.lastMissAt ? 1 : -1),
                 recent: (a, b) => a.d.lastMissAt < b.d.lastMissAt ? 1 : -1,
-                first: (a, b) => (a.it.firstMissAt || "") < (b.it.firstMissAt || "") ? -1 : 1 };
+                first: (a, b) => (a.it.firstMissAt || "") < (b.it.firstMissAt || "") ? -1 : 1,
+                // 解いた記録の集計（QB.stats。練習も含む）から並べる（2026-11-10〜）
+                stale: (a, b) => (a.s.lastAt || "") < (b.s.lastAt || "") ? -1 : (a.s.lastAt || "") > (b.s.lastAt || "") ? 1 : 0,
+                tri: (a, b) => b.s.tri - a.s.tri || b.s.triRun - a.s.triRun || b.s.x - a.s.x,
+                x: (a, b) => b.s.x - a.s.x || b.s.tri - a.s.tri,
+                triRun: (a, b) => b.s.triRun - a.s.triRun || b.s.missRun - a.s.missRun || b.s.tri - a.s.tri };
+// 絞り込み（どのタブでも使える。1問ずつ解く・見出しから解くも絞り込んだ問題だけになる）
+const STALE_DAYS = 14;
+const FILTERS = { all: () => true,
+                  triRun: r => r.s.triRun >= 2,           // いちばん新しい記録から△が2回以上続いている
+                  missRun: r => r.s.missRun >= 2,         // ×か△が2回以上続いている
+                  neverOk: r => r.s.neverOk,              // ○・◎になったことが一度も無い
+                  stale: r => !r.s.lastAt || QB.diffDays(today(), QB.dayKey(r.s.lastAt)) >= STALE_DAYS }; // 2週間以上解いていない
 // 国試の回（114A91 → 114）。QBオリジナルなど回の無い問題は ""
 const examNo = it => { const v = Number(it.examVersion || (String(it.label || "").match(/^改?(\d{2,3})[A-Z追]/) || [])[1]); return v >= 80 && v <= 130 ? String(v) : ""; };
 // タブごとの問題（今日の復習・総復習・今日間違えた・克服済みは拡張機能のルールと同じ分け方）
@@ -98,13 +110,13 @@ const revDone = d => d.missToday && d.attempts.some(t => t.free && t.judge && QB
 const revTab = () => tab === "review" || tab === "today";
 const pageRevDone = p => p.picked.every(r => r.rv);
 function view() {
-  const every = allItems().map(it => { const d = QB.derive(it); return { it, d, rv: revDone(d) }; });
+  const every = allItems().map(it => { const d = QB.derive(it); return { it, d, s: QB.stats(d.attempts), rv: revDone(d) }; });
   // 連問のまとまり（○の小問＝companion も含む）
   const byKey = new Map();
   for (const r of every) { const k = QB.seriesKey(r.it); if (!byKey.has(k)) byKey.set(k, []); byKey.get(k).push(r); }
   for (const g of byKey.values()) g.sort((a, b) => subNo(a.it) - subNo(b.it));
   const all = every.filter(r => r.d.miss > 0);
-  const pick = pickTab(tab, all, ld(new Date().toISOString()));
+  const pick = pickTab(tab, all, ld(new Date().toISOString())).filter(FILTERS[$("filter").value] || FILTERS.all);
   // 総復習の並び：まだ解いていない → 遅れが長い → 直近が× → 必修
   if (tab === "due") pick.sort((a, b) => a.d.doneToday - b.d.doneToday || (a.d.dueBefore < b.d.dueBefore ? -1 : a.d.dueBefore > b.d.dueBefore ? 1 : 0)
     || (b.d.lastMissJudge === "×") - (a.d.lastMissJudge === "×") || !!b.it.required - !!a.it.required);
@@ -137,7 +149,9 @@ function badges(d) {
     + (d.due ? `<span class="pill ${d.due < today() ? "late" : "due"}">次 ${esc(QB.dueText(d.due))}</span>` : "");
 }
 const leechPill = d => d.leech ? `<span class="pill leech" title="×・△にした日が${d.missDays}日">苦手</span>` : "";
-const statusPills = r => r.d.miss > 0 ? `${leechPill(r.d)}<span class="pill miss">${r.d.miss}回間違い</span>${badges(r.d)}` : '<span class="pill ok">○ QBで正解</span>';
+// 解いた記録の集計（練習も含む）：最後に解いた日・×△の回数・△の続き
+const statText = s => !s.total ? "" : `<span class="stat" title="練習も含めた、これまでの記録（${s.total}回）">最後に解いた ${ld(s.lastAt)}・×${s.x} △${s.tri} ○${s.ok}${s.triRun >= 2 ? `・△が${s.triRun}回続いている` : s.missRun >= 2 ? `・×△が${s.missRun}回続いている` : ""}${s.neverOk ? "・まだ○なし" : ""}</span>`;
+const statusPills = r => r.d.miss > 0 ? `${leechPill(r.d)}<span class="pill miss">${r.d.miss}回間違い</span>${badges(r.d)}${statText(r.s)}` : '<span class="pill ok">○ QBで正解</span>';
 const tagChips = tags => tags.map(t => `<span class="chip">#${esc(t)}</span>`).join("");
 // 連問の小問の文。以前の記録（114A91）は小問の文の代わりに前文が入っているので、その旨を出す（PCの取り込みで読み直すと直る）
 const subBody = (it, series) => { if (!series) return it.text; const x = QB.splitText(it.text);
@@ -163,7 +177,7 @@ function card(p) {
   const lead = p.lead;
   return `<article class="item" data-key="${esc(p.key)}"><div class="top"><span class="qid">${esc(pageLabel(p))}</span>
     ${revTab() && pageRevDone(p) ? '<span class="pill done">今日の復習 済み</span>' : ""}${lead.it.required ? '<span class="pill due">必修</span>' : ""}${series ? '<span class="pill">連問</span>' : statusPills(lead)}
-    ${series ? "" : `<span>最終 ${lead.d.lastMissAt ? ld(lead.d.lastMissAt) : "-"}</span>`}${tagChips(tagsOfPage(p))}</div>
+    ${series ? "" : `<span>最後に間違えた ${lead.d.lastMissAt ? ld(lead.d.lastMissAt) : "-"}</span>`}${tagChips(tagsOfPage(p))}</div>
     ${series ? `<div class="q">${esc(pre)}</div>` : ""}${imgTags(qImgs)}${subs}
     <div class="acts"><button class="go" data-act="solve">この問題を解く</button><button data-act="del">削除</button>${p.members.some(m => m.d.cleared) ? '<button data-act="back">一覧に戻す</button>' : ""}${p.members.some(m => m.d.leech) ? '<button data-act="unleech">苦手から外す</button>' : ""}</div></article>`;
 }
@@ -767,7 +781,10 @@ function showGhForm() {
 // ---- 操作 ----
 $("tabs").onclick = $("tabs2").onclick = e => { const t = e.target.closest("button"); if (t && t.dataset.tab) setTab(t.dataset.tab); };
 $("tagBar").onclick = e => { const b = e.target.closest("[data-tag]"); if (b) { curTag = b.dataset.tag; lsSet("qb_tag", curTag); render(); } };
-$("sort").onchange = render;
+// 並び順・絞り込みは端末に覚えておく
+for (const id of ["sort", "filter"]) { const v = lsGet("qb_" + id, ""); if (v && [...$(id).options].some(o => o.value === v)) $(id).value = v; }
+$("sort").onchange = () => { lsSet("qb_sort", $("sort").value); render(); };
+$("filter").onchange = () => { lsSet("qb_filter", $("filter").value); render(); };
 $("list").addEventListener("toggle", e => {
   const g = e.target;
   if (!g.classList || !g.classList.contains("grp")) return;

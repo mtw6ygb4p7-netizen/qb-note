@@ -98,6 +98,7 @@ details.grp>summary.subj>span{margin-left:auto;white-space:nowrap;font-size:12px
 .nav{display:flex;justify-content:space-between;gap:8px;margin-top:12px}
 .nav button{padding:10px 18px}
 .pill.ok{color:var(--ok)}
+.stat{font-size:12px;color:var(--sub);font-variant-numeric:tabular-nums}
 .pill.leech{color:var(--accent-ink);background:var(--tri);border-color:var(--tri);font-weight:700}
 .tabbar{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin:14px 0 0;border-bottom:3px solid var(--accent)}
 .tabbar button{border:1px solid var(--line);border-bottom:0;border-radius:10px 10px 0 0;background:var(--card);padding:10px 4px 8px;
@@ -191,6 +192,17 @@ details.grp>summary.subj>span{margin-left:auto;white-space:nowrap;font-size:12px
         <option value="miss">間違い回数が多い順</option>
         <option value="recent">最近間違えた順</option>
         <option value="first">登録が古い順</option>
+        <option value="stale">最後に解いたのが古い順</option>
+        <option value="tri">△が多い順</option>
+        <option value="x">×が多い順</option>
+        <option value="triRun">△が続いている順</option>
+      </select>
+      <select id="filter" aria-label="絞り込み">
+        <option value="all">すべての問題</option>
+        <option value="triRun">△が2回以上続いている</option>
+        <option value="missRun">×・△が2回以上続いている</option>
+        <option value="neverOk">まだ一度も○になっていない</option>
+        <option value="stale">2週間以上解いていない</option>
       </select>
       <button id="openAll">すべて開く</button>
       <button id="closeAll">すべて閉じる</button>

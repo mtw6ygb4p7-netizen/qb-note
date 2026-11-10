@@ -90,6 +90,20 @@ const QB = {
     return { miss, lastMissAt, lastMissJudge, cleared, attempts, step: now.step, due: now.due, missDays, leech,
              dueBefore: before.due, inToday, missToday, unreviewed: !now.cleared && days.length <= 1, doneToday: !!todayFirst, todayFirst };
   },
+  // 解いた記録の集計（苦手を探す用。2026-11-10〜）。復習の予定とは別に、臨時の演習（練習）も含めて数える（withFree=false で外す）
+  //   lastAt：最後に解いた日時（○でも）／x・tri・ok：×・△・○◎の回数（1回解くごと）／total：判定の付いた回数
+  //   triRun：いちばん新しい記録から続いている△の回数／missRun：同じく×か△が続いている回数／neverOk：○◎が一度も無い
+  stats(attempts, withFree = true) {
+    const list = [...(attempts || [])].filter((t) => t && (QB.isMiss(t.judge) || QB.isCorrect(t.judge)) && (withFree || QB.counts(t)))
+      .sort((a, b) => (a.at < b.at ? -1 : 1));
+    let x = 0, tri = 0, ok = 0;
+    for (const t of list) { if (t.judge === "×") x++; else if (t.judge === "△") tri++; else ok++; }
+    let triRun = 0, missRun = 0;
+    for (let i = list.length - 1; i >= 0 && list[i].judge === "△"; i--) triRun++;
+    for (let i = list.length - 1; i >= 0 && QB.isMiss(list[i].judge); i--) missRun++;
+    const last = list[list.length - 1];
+    return { lastAt: last ? last.at : null, lastJudge: last ? last.judge : null, x, tri, ok, total: list.length, triRun, missRun, neverOk: list.length > 0 && ok === 0 };
+  },
   // 「次 11/12（3日後）」の形
   dueText(due, today = QB.dayKey(new Date().toISOString())) {
     if (!due) return "";
