@@ -110,6 +110,9 @@ const subNo = it => Number((String(it.label || "").match(/(\d+)$/) || [])[1] || 
 // 復習の予定（はしご）は変えない。今日の復習の残りの数を減らし、一覧の後ろに回すためだけに使う
 const revDone = d => d.missToday && d.attempts.some(t => t.free && t.judge && QB.dayKey(t.at) === today() && (!d.lastMissAt || t.at > d.lastMissAt));
 const revTab = () => tab === "review" || tab === "today";
+// 今日間違えた：QBで間違えたか（総復習で間違えたものと分ける。2026-11-10〜）。
+// QBの記録（拡張機能が画面・取り込みで記録した分）には src が無い。アプリで解いた記録には src（端末名）がある
+const qbMissToday = d => d.attempts.some(t => !t.src && !t.free && QB.isMiss(t.judge) && QB.dayKey(t.at) === today());
 const pageRevDone = p => p.picked.every(r => r.rv);
 function view() {
   const every = allItems().map(it => { const d = QB.derive(it); return { it, d, s: QB.stats(d.attempts), rv: revDone(d) }; });
@@ -118,7 +121,8 @@ function view() {
   for (const r of every) { const k = QB.seriesKey(r.it); if (!byKey.has(k)) byKey.set(k, []); byKey.get(k).push(r); }
   for (const g of byKey.values()) g.sort((a, b) => subNo(a.it) - subNo(b.it));
   const all = every.filter(r => r.d.miss > 0);
-  const pick = pickTab(tab, all, ld(new Date().toISOString())).filter(FILTERS[$("filter").value] || FILTERS.all);
+  let pick = pickTab(tab, all, ld(new Date().toISOString())).filter(FILTERS[$("filter").value] || FILTERS.all);
+  if (tab === "today" && $("todaySrc").value === "qb") pick = pick.filter(r => qbMissToday(r.d)); // 1問ずつ解く・見出しから解くも、この範囲だけ
   // 総復習の並び：まだ解いていない → 遅れが長い → 直近が× → 必修
   if (tab === "due") pick.sort((a, b) => a.d.doneToday - b.d.doneToday || (a.d.dueBefore < b.d.dueBefore ? -1 : a.d.dueBefore > b.d.dueBefore ? 1 : 0)
     || (b.d.lastMissJudge === "×") - (a.d.lastMissJudge === "×") || !!b.it.required - !!a.it.required);
@@ -252,6 +256,7 @@ function render() {
   const soon = n => all.filter(r => !r.d.cleared && r.d.due && r.d.due > day && r.d.due <= QB.addDays(day, n)).length;
   $("stats").innerHTML = `<span><b>${set.length - done}</b>問 総復習の残り（済み${done}）</span><span><b>${soon(1)}</b>問 明日</span><span><b>${soon(7)}</b>問 7日以内</span><span><b>${active}</b>問 要復習</span><span><b>${all.length - active}</b>問 克服済み</span>`;
   $("dueTab").setAttribute("aria-pressed", String(tab === "due"));
+  $("todaySrc").hidden = tab !== "today";
   $("dueTab").textContent = `総復習を始める（残り${set.length - done}問）`;
   $("start").textContent = tab === "due" ? "1問ずつ解く（復習の予定に反映）" : "1問ずつ解く（臨時・復習の予定には反映しない）";
   const ldToday = ld(new Date().toISOString());
@@ -783,9 +788,10 @@ function showGhForm() {
 $("tabs").onclick = $("tabs2").onclick = e => { const t = e.target.closest("button"); if (t && t.dataset.tab) setTab(t.dataset.tab); };
 $("tagBar").onclick = e => { const b = e.target.closest("[data-tag]"); if (b) { curTag = b.dataset.tag; lsSet("qb_tag", curTag); render(); } };
 // 並び順・絞り込みは端末に覚えておく
-for (const id of ["sort", "filter"]) { const v = lsGet("qb_" + id, ""); if (v && [...$(id).options].some(o => o.value === v)) $(id).value = v; }
+for (const id of ["sort", "filter", "todaySrc"]) { const v = lsGet("qb_" + id, ""); if (v && [...$(id).options].some(o => o.value === v)) $(id).value = v; }
 $("sort").onchange = () => { lsSet("qb_sort", $("sort").value); render(); };
 $("filter").onchange = () => { lsSet("qb_filter", $("filter").value); render(); };
+$("todaySrc").onchange = () => { lsSet("qb_todaySrc", $("todaySrc").value); render(); };
 $("list").addEventListener("toggle", e => {
   const g = e.target;
   if (!g.classList || !g.classList.contains("grp")) return;
