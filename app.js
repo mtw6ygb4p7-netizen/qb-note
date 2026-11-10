@@ -397,6 +397,98 @@ $("reviewView").addEventListener("keydown", e => {
   if (e.target.id === "tagIn" && e.key === "Enter" && !e.isComposing) { e.preventDefault(); addTagFromInput(pageCache.p); }
   else if (e.target.classList && e.target.classList.contains("pickable") && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); e.target.click(); }
 });
+// ---- マウス・キー・音声の操作（拡張機能「QBマウス操作」と同じ。演習画面だけ）----
+//   右クリック：答え合わせ前は答え合わせ（何も選んでいなければ自己判定を○にする）、答え合わせ後は次の問題
+//   左クリック：答え合わせ後は前の問題（ボタン・選択肢・入力欄などは、ふつうに押せる）。答え合わせ前はふつうの動き
+//   数字キー 1〜9：選択肢を選ぶ（複数選ぶ問題はもう一度押すと外れる。連問は、まだ選び終わっていない小問から）
+//   Alt+Q：マウス操作のオン・オフ　Alt+V：音声（「いち」「に」…で選択肢、「かいとう」で答え合わせ、「つぎ」「まえ」）
+// マウスのある端末（PC）では最初からオン。iPad・iPhone（タッチ）ではオフ（長押しで答え合わせ・タップで前に戻るのを防ぐ）
+const hasMouse = matchMedia("(hover: hover) and (pointer: fine)").matches;
+let mouseOn = lsGet("qb_mouse", hasMouse), voiceOn = false, voiceRec = null;
+const MPASS = "a, button, input, textarea, select, summary, label, .pickable, .chip, [contenteditable]";
+const mouseBadge = document.createElement("div");
+mouseBadge.className = "mbadge";
+document.body.appendChild(mouseBadge);
+const shownNow = () => !!(ses && pageCache && ses.shown[pageCache.p.key]);
+function refreshMouseBadge(msg) {
+  mouseBadge.hidden = !inPractice() || (!mouseOn && !voiceOn && !hasMouse);
+  mouseBadge.classList.toggle("off", !mouseOn);
+  mouseBadge.textContent = msg || (mouseOn ? "マウス操作 ON（Alt+Qで切替）" : "マウス操作 OFF（Alt+Q）") + (voiceOn ? " / 🎤音声 ON" : " / 音声 OFF（Alt+V）");
+}
+let badgeUntil = 0; // 知らせを出している間は、ふだんの表示に戻さない
+const badgeMsg = m => { badgeUntil = Date.now() + 2500; refreshMouseBadge(m); };
+setInterval(() => { if (Date.now() > badgeUntil) refreshMouseBadge(); }, 1000);
+const clickId = id => { const b = $(id); if (b && !b.disabled) { b.click(); return true; } return false; };
+// 答え合わせ。何も選んでいない小問は自己判定を○にする（QBマウス操作の「何も選ばずに解答 → 自己評価○」と同じ）
+function answerNow() {
+  if (!ses || !pageCache || shownNow() || !$("rvShow")) return;
+  let set = 0;
+  for (const m of pageCache.p.members) {
+    if (m.d.miss <= 0) continue;
+    const st = stOf(m.it.id);
+    if (!st.chosen.length && !st.judge) { st.judge = "○"; set++; }
+  }
+  clickId("rvShow");
+  if (set) badgeMsg("自己判定を○にしました");
+}
+// 数字キー・音声の選択肢：まだ選び終わっていない小問（連問）から選ぶ
+function pickChoice(n) {
+  if (!ses || !pageCache || shownNow()) return;
+  const solve = pageCache.p.members.filter(m => m.d.miss > 0);
+  const m = solve.find(x => stOf(x.it.id).chosen.length < Math.max(1, answersOf(x.it).length)) || solve[0];
+  if (!m) return;
+  const c = (m.it.choices || [])[n - 1];
+  const el = c && [...document.querySelectorAll("#reviewView .pickable")].find(x => x.dataset.q === m.it.id && x.dataset.n === c.n);
+  if (el) el.click();
+}
+window.addEventListener("click", e => {
+  if (e.button !== 0 || !e.isTrusted || !mouseOn || !inPractice() || !shownNow()) return;
+  if (e.target.closest && e.target.closest(MPASS)) return;
+  e.preventDefault(); e.stopPropagation();
+  clickId("rvPrev");
+}, true);
+window.addEventListener("contextmenu", e => {
+  if (!mouseOn || !inPractice() || (e.target.closest && e.target.closest("input, textarea, select, a"))) return;
+  e.preventDefault(); e.stopPropagation();
+  if (shownNow()) clickId("rvNext"); else answerNow();
+}, true);
+window.addEventListener("keydown", e => {
+  if (e.altKey && e.code === "KeyQ") { e.preventDefault(); mouseOn = !mouseOn; lsSet("qb_mouse", mouseOn); refreshMouseBadge(); return; }
+  if (e.altKey && e.code === "KeyV") { e.preventDefault(); toggleVoice(); return; }
+  if (!mouseOn || !inPractice() || e.ctrlKey || e.altKey || e.metaKey || e.repeat) return;
+  if (e.target && e.target.closest && e.target.closest("input, textarea, select, [contenteditable]")) return;
+  const m = /^(?:Digit|Numpad)([1-9])$/.exec(e.code);
+  if (m) { e.preventDefault(); pickChoice(Number(m[1])); }
+}, true);
+// 音声（QBマウス操作と同じ言葉）
+const VNUM = { 1: ["1", "一", "いち", "イチ", "ひとつ"], 2: ["2", "二", "に", "ニ", "ふたつ"], 3: ["3", "三", "さん", "サン", "みっつ"],
+  4: ["4", "四", "よん", "ヨン", "し", "よっつ"], 5: ["5", "五", "ご", "ゴ", "いつつ"], 6: ["6", "六", "ろく", "ロク"],
+  7: ["7", "七", "なな", "ナナ", "しち"], 8: ["8", "八", "はち", "ハチ"], 9: ["9", "九", "きゅう", "キュウ", "く"] };
+const vnorm = s => s.normalize("NFKC").replace(/[\s、。,.!！?？]/g, "").replace(/(です|を選択|を選ぶ|番|ばん|バン)$/g, "");
+function voiceAct(text) {
+  const w = vnorm(text);
+  if (!w || !inPractice()) return false;
+  if (["かいとう", "カイトウ", "解答", "回答", "答え", "こたえ", "答え合わせ", "こたえあわせ"].includes(w)) { answerNow(); return true; }
+  if (["つぎ", "ツギ", "次", "次の問題", "つぎのもんだい"].includes(w)) { clickId(shownNow() ? "rvNext" : "rvSkip"); return true; }
+  if (["まえ", "マエ", "前", "前の問題", "まえのもんだい"].includes(w)) { clickId("rvPrev"); return true; }
+  for (const n in VNUM) if (VNUM[n].includes(w)) { pickChoice(Number(n)); return true; }
+  return false;
+}
+function startVoice() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { voiceOn = false; badgeMsg("この端末は音声認識に未対応です"); return; }
+  voiceRec = new SR(); voiceRec.lang = "ja-JP"; voiceRec.continuous = true; voiceRec.interimResults = true;
+  const handled = {};
+  voiceRec.onresult = ev => { for (let i = ev.resultIndex; i < ev.results.length; i++) if (!handled[i] && voiceAct(ev.results[i][0].transcript)) handled[i] = true; };
+  voiceRec.onerror = ev => { if (ev.error === "not-allowed" || ev.error === "service-not-allowed") { voiceOn = false; badgeMsg("マイクが許可されていません"); } };
+  voiceRec.onend = () => { if (voiceOn) startVoice(); }; // 自動で途切れるので再開
+  try { voiceRec.start(); } catch (e) {}
+}
+function toggleVoice() {
+  voiceOn = !voiceOn;
+  if (voiceOn) startVoice(); else if (voiceRec) { voiceRec.onend = null; voiceRec.stop(); }
+  refreshMouseBadge();
+}
 function addTagFromInput(p) {
   const v = $("tagIn").value.trim().replace(/^#/, "");
   if (v) setTags(p, [...tagsOfPage(p), v]);
