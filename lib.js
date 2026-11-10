@@ -17,6 +17,9 @@ const QB = {
   subjectLabel: (code) => (QB_SUBJECTS[code] ? code + " " + QB_SUBJECTS[code] : "未分類"),
   isMiss: (j) => j === "×" || j === "△",
   isCorrect: (j) => j === "○" || j === "◎",
+  // 復習の予定（はしご・間違い回数・苦手）に数える記録か。アプリの臨時の演習（科目別などの見出しから・総復習以外の「1問ずつ解く」）は
+  // free: true で、履歴に残すだけで数えない（2026-11-10〜。数えるのはQBで解いた記録と、アプリの「総復習を始める」から解いた記録）
+  counts: (t) => !(t && t.free),
 
   // ---- 出す日（はしご）：1日→3日→7日→14日→30日→克服 ----
   // 1日1回として数え、その日のいちばん悪い評価を使う（最初が○でも後で×なら×）。×＝一番下（翌日）、△＝2段下がる、○＝1段上、◎＝2段上。
@@ -66,11 +69,12 @@ const QB = {
   // attempts（解いた記録）から、間違い回数・段・出す日・状態を毎回計算し直す
   derive(item, today = QB.dayKey(new Date().toISOString())) {
     const attempts = [...item.attempts].sort((a, b) => (a.at < b.at ? -1 : 1));
+    const counted = attempts.filter(QB.counts); // 臨時の演習（free）は数えない。attempts（返す方）は履歴の表示用に全部
     let miss = 0, lastMissAt = null, lastMissJudge = null;
-    for (const t of attempts) {
+    for (const t of counted) {
       if (QB.isMiss(t.judge)) { miss++; lastMissAt = t.at; lastMissJudge = t.judge; }
     }
-    const days = QB.firstOfDays(attempts);
+    const days = QB.firstOfDays(counted);
     const now = QB.schedule(days);
     const before = QB.schedule(days.filter((x) => x.day < today)); // 今日の朝の時点
     const todayFirst = (days.find((x) => x.day === today) || {}).judge || null;

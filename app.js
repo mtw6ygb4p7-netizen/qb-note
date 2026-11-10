@@ -55,7 +55,7 @@ function allItems() {
       const extra = add.get(it.id);
       if (extra) {
         const m = new Map(attempts.map(t => [t.key, t]));
-        for (const t of extra) m.set(t.key, { key: t.key, at: t.at, judge: t.judge, src: t.src, chosen: t.chosen, result: t.result });
+        for (const t of extra) m.set(t.key, { key: t.key, at: t.at, judge: t.judge, src: t.src, chosen: t.chosen, result: t.result, ...(t.free ? { free: true } : {}) });
         attempts = [...m.values()];
       }
       const got = QB.applyOps({ ...it, attempts }, ops.get(it.id));
@@ -147,7 +147,8 @@ function card(p) {
   const subs = p.members.map(m => {
     const { it, d } = m, ans = answersOf(it), im = QB.imagesOf(it);
     const ch = (it.choices || []).map(c => `<div class="choice${ans.includes(c.n) ? " ans" : ""}">${esc(c.n)}　${esc(c.text)}${ans.includes(c.n) ? "　← 正解" : ""}</div>`).join("");
-    const h = d.attempts.filter(t => t.judge).map(t => `<span>${ld(t.at)} <b class="${jc(t.judge)}">${esc(t.judge)}</b></span>`).join("");
+    // 臨時の演習（free）は「練習」と付けて薄く出す（復習の予定には数えていない）
+    const h = d.attempts.filter(t => t.judge).map(t => `<span${t.free ? ' class="free" title="臨時の演習（復習の予定には数えない）"' : ""}>${ld(t.at)} <b class="${jc(t.judge)}">${esc(t.judge)}</b>${t.free ? "練習" : ""}</span>`).join("");
     const body = subBody(it, series);
     return `<div class="${series ? "subq" : ""}">${series ? `<div class="top"><span class="qid">${esc(it.label)}</span>${statusPills(m)}</div>` : ""}
       <div class="q">${esc(body)}</div>
@@ -164,20 +165,24 @@ function card(p) {
 
 // まとめ方：科目別（QBの分野順 → 年度別 → 未分類）／回数別（新しい回から）／日付別（最後に間違えた日、新しい順）
 let openGroups = new Set(lsGet("qb_open_groups", []));
+// 見出し（科目・回・日付）の決め方。見出しから解くとき（startGroup）も同じ分け方を使う
+const grpKeyOf = p => { const it = p.lead.it;
+  return tab === "date" ? (p.lead.d.lastMissAt ? ld(p.lead.d.lastMissAt) : "-")
+    : tab === "exam" ? "回" + (examNo(it) || "-")
+    : it.exam ? "回" + (examNo(it) || "-")
+    : (QB_SUBJECTS[it.subjectCode] ? it.subjectCode : ""); };
 function grouped(pages) {
   const g = new Map(), byDate = tab === "date", byExam = tab === "exam";
-  const keyOf = p => { const it = p.lead.it;
-    return byDate ? (p.lead.d.lastMissAt ? ld(p.lead.d.lastMissAt) : "-")
-      : byExam ? "回" + (examNo(it) || "-")
-      : it.exam ? "回" + (examNo(it) || "-")
-      : (QB_SUBJECTS[it.subjectCode] ? it.subjectCode : ""); };
+  const keyOf = grpKeyOf;
   for (const p of pages) { const k = keyOf(p); if (!g.has(k)) g.set(k, []); g.get(k).push(p); }
   const keys = byDate ? [...g.keys()].sort().reverse()
     : [...QB_SUBJECT_ORDER.filter(k => g.has(k)), ...[...g.keys()].filter(k => k.startsWith("回")).sort((a, b) => b.slice(1) - a.slice(1)), ...(g.has("") ? [""] : [])];
   const label = k => byDate ? k : k.startsWith("回") ? (byExam ? "" : "年度別 ") + "第" + k.slice(1) + "回" : QB.subjectLabel(k);
   const one = keys.length === 1;
   return keys.map(k => { const gk = tab + ":" + k, n = g.get(k).reduce((s, p) => s + p.picked.length, 0);
-    return `<details class="grp" data-gk="${esc(gk)}"${one || openGroups.has(gk) ? " open" : ""}><summary class="subj">${esc(label(k))}<span>${n}問</span></summary>`
+    // 見出しの「この中を解く」：その見出しの問題だけで臨時の演習（総復習のタブでは総復習として数える）
+    return `<details class="grp" data-gk="${esc(gk)}"${one || openGroups.has(gk) ? " open" : ""}><summary class="subj">${esc(label(k))}<span>${n}問</span>`
+      + `<button class="grpgo" data-grp="${esc(k)}" data-gname="${esc(label(k))}">この中を解く</button></summary>`
       + g.get(k).map(card).join("") + `</details>`; }).join("");
 }
 
@@ -227,6 +232,7 @@ function render() {
   $("dueTab").setAttribute("aria-pressed", String(tab === "due"));
   $("reviewTab").textContent = `今日の復習（${newToday}問）`;
   $("dueTab").textContent = `総復習を始める（残り${set.length - done}問）`;
+  $("start").textContent = tab === "due" ? "1問ずつ解く（復習の予定に反映）" : "1問ずつ解く（臨時・復習の予定には反映しない）";
   const ldToday = ld(new Date().toISOString());
   // タブの下の小さな字：問題数（未演習＝登録してから一度も復習していない数）。タグはタグの数
   document.querySelectorAll("#tabs button, #tabs2 button").forEach(b => {
@@ -268,12 +274,16 @@ function renderResume() {
   $("resumeGo").onclick = () => openSession();
   $("resumeDrop").onclick = () => { if (confirm("途中の演習をやめますか？（解いた記録は残ります）")) { ses = null; saveSes(); render(); } };
 }
-function startSession() {
+// 演習の結果が復習の予定（はしご）に効くのは「総復習を始める」から解いたときだけ。ほかは臨時の演習（free）
+// grp：見出し（科目・回・日付）の key。指定すると、その見出しの問題だけを解く
+function startSession(grp, gname) {
   const { pick, byKey } = view();
-  const pages = pagesOf(pick, byKey);
+  let pages = pagesOf(pick, byKey);
+  if (grp !== undefined) pages = pages.filter(p => grpKeyOf(p) === grp);
   if (!pages.length) return;
   if (ses && !confirm(`途中の演習（${ses.name} ${ses.pos + 1}/${ses.keys.length}）があります。やめて新しく始めますか？`)) return;
-  ses = { id: Date.now().toString(36), name: tabName(tab), tab, keys: pages.map(p => p.key), pos: 0, st: {}, shown: {}, open: true };
+  const free = tab !== "due";
+  ses = { id: Date.now().toString(36), name: tabName(tab) + (gname ? "：" + gname : ""), tab, free, keys: pages.map(p => p.key), pos: 0, st: {}, shown: {}, open: true };
   saveSes();
   openSession();
 }
@@ -324,7 +334,8 @@ function showReview(top) {
   const nAns = !series ? answersOf(p.lead.it).length : 0;
   const last = ses.pos + 1 >= pages.length;
   const y = window.scrollY;
-  $("reviewView").innerHTML = `<div class="meta">${esc(ses.name)} ${ses.pos + 1} / ${pages.length}${nAns > 1 ? "　（" + nAns + "つ選ぶ）" : ""}</div>
+  const mode = ses.free ? '<span class="pill free">臨時の演習・復習の予定には反映しません</span>' : '<span class="pill due">総復習・復習の予定に反映します</span>';
+  $("reviewView").innerHTML = `<div class="meta">${mode} ${esc(ses.name)} ${ses.pos + 1} / ${pages.length}${nAns > 1 ? "　（" + nAns + "つ選ぶ）" : ""}</div>
     <article class="item"><div class="top"><span class="qid">${esc(pageLabel(p))}</span>${p.lead.it.required ? '<span class="pill due">必修</span>' : ""}
       ${series ? '<span class="pill">連問</span>' : `${leechPill(p.lead.d)}<span class="pill miss">${p.lead.d.miss}回間違い</span>`}</div>
     <div class="tags">${tags.map(t => `<span class="chip">#${esc(t)}<button class="x" data-untag="${esc(t)}" aria-label="タグ ${esc(t)} を外す">×</button></span>`).join("")}
@@ -404,10 +415,11 @@ function recordAttempt(it, st) {
   const ans = answersOf(it), chosen = st.chosen;
   const result = !chosen.length || !ans.length ? null : ans.length === chosen.length && ans.every(n => chosen.includes(n)) ? "正解" : "不正解";
   const ex = local.attempts.find(t => t.key === key);
-  if (ex) Object.assign(ex, { judge: st.judge, chosen: chosen.join(","), result });
-  else local.attempts.push({ qid: it.id, key, at: new Date().toISOString(), judge: st.judge, src: dev(), chosen: chosen.join(","), result });
+  const free = ses.free ? { free: true } : {}; // 臨時の演習：履歴には残すが、復習の予定・間違い回数・苦手には数えない（QB.counts）
+  if (ex) Object.assign(ex, { judge: st.judge, chosen: chosen.join(","), result }, free);
+  else local.attempts.push({ qid: it.id, key, at: new Date().toISOString(), judge: st.judge, src: dev(), chosen: chosen.join(","), result, ...free });
   const now = leechOf(it.id);
-  if (now && now.leech && !(was && was.leech)) toast(`${it.label}：×・△が${now.missDays}日目です。定着しにくい問題として「苦手」に入れました`);
+  if (!ses.free && now && now.leech && !(was && was.leech)) toast(`${it.label}：×・△が${now.missDays}日目です。定着しにくい問題として「苦手」に入れました`);
   persistLocal();
 }
 function persistLocal() { // 端末の中に保存するだけ。サーバーへ送るのは「同期する」を押したとき
@@ -454,7 +466,7 @@ function exportBody() {
   for (const t of local.attempts) {
     const st = data.examItems && data.examItems[t.qid] && !(data.items && data.items[t.qid]) ? examItems : items;
     if (!st[t.qid]) st[t.qid] = { id: t.qid, attempts: [] };
-    st[t.qid].attempts.push({ key: t.key, at: t.at, judge: t.judge, src: t.src, chosen: t.chosen, result: t.result });
+    st[t.qid].attempts.push({ key: t.key, at: t.at, judge: t.judge, src: t.src, chosen: t.chosen, result: t.result, ...(t.free ? { free: true } : {}) });
   }
   return { version: 1, exportedAt: new Date().toISOString(), from: "qb-mobile", items, examItems };
 }
@@ -680,7 +692,14 @@ $("closeAll").onclick = () => document.querySelectorAll("#list details.grp").for
 $("dueTab").onclick = () => setTab("due");
 $("reviewTab").onclick = () => setTab("review");
 // いま表示している一覧を1問ずつ（解き直して○でも、今日の復習の記録は今日のいちばん悪い評価のまま）
-$("start").onclick = startSession;
+$("start").onclick = () => startSession();
+// 見出しの「この中を解く」（押しても見出しは開閉しない）
+$("list").addEventListener("click", e => {
+  const b = e.target.closest("[data-grp]");
+  if (!b) return;
+  e.preventDefault(); e.stopPropagation();
+  startSession(b.dataset.grp, b.dataset.gname);
+}, true);
 addEventListener("online", () => { if (!inPractice()) render(); });
 addEventListener("offline", () => { if (!inPractice()) render(); });
 // 日をまたいで開きっぱなしでも、今日の分を出し直す（通信はしない）
