@@ -417,7 +417,7 @@ function persistLocal() { // 端末の中に保存するだけ。サーバーへ
 
 // ---- 読み込み・書き出し ----
 let toastTimer = 0;
-function toast(msg) { const t = $("toast"); t.textContent = msg; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, 4000); }
+function toast(msg, ms = 4000) { const t = $("toast"); t.textContent = msg; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, ms); }
 
 async function importData(obj) {
   if (!obj || obj.kind !== "qb-mobile-data") throw new Error("iPad用データのファイルではありません");
@@ -615,7 +615,11 @@ window.addEventListener("message", e => {
     if (extBusy === "catchup" && !c.running && c.finishedAt > lastCatchupDone) extBusy = "";
     // 押した読み込みが終わったら1回だけ知らせる
     if (lastCatchupDone && c.finishedAt > lastCatchupDone && !c.running) {
-      toast(c.error ? "QBから読み込めませんでした：" + c.error : c.recorded ? `QBから${c.recorded}件をPCに読み込みました。「同期する」でこの画面とほかの端末に届きます` : "QBに新しい解答はありませんでした");
+      // PCのQBの画面で解いた分は、解いたときにもうPCに入っている（読み込みは0件）。この画面に出すには「同期する」が要る
+      toast(c.error ? "QBから読み込めませんでした：" + c.error
+        : c.recorded ? `QBから${c.recorded}件をPCに読み込みました。「同期する」を押すと、この画面とほかの端末に出ます`
+        : m.pending ? "QBの新しい解答は、もうPCに入っています（PCで解いた分）。「同期する」を押すと、この画面に出ます"
+        : "QBに新しい解答はありませんでした", 8000);
       lastCatchupDone = 0;
     }
     onExtStatus(c, m.gh || {}, m.pending);
