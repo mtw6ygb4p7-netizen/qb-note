@@ -364,6 +364,15 @@ const stOf = qid => (ses.st[qid] = ses.st[qid] || { chosen: [], judge: null });
 function judgeBtns(qid, judge) {
   return ["◎", "○", "△", "×"].map(j => `<button class="jbtn j-${jc(j)}${judge === j ? " on" : ""}" data-j="${j}" data-q="${esc(qid)}">${j}</button>`).join("");
 }
+// 連問の解説は、小問ごとに出さず最後に1つにまとめる（2026-11-12〜。111A103-105 で同じ「基本事項」と解説の画像が小問の数だけ並んでいた）。
+// 小問ごとの「正解・解説」を順に出し、2つ以上の小問に同じ段落（基本事項など）があれば最後に1回だけ。解説の画像も最後に1回だけ
+function seriesExp(p) {
+  const paras = p.members.map(m => String(m.it.explanation || "").split(/\n\s*\n/).map(x => x.trim()).filter(Boolean));
+  const shared = new Set(paras.flat().filter((x, i, a) => a.indexOf(x) !== i));
+  const parts = p.members.map((m, i) => `<div class="exp"><b>${esc(m.it.label)}</b>　正解：${esc(m.it.answer)}\n\n${esc(paras[i].filter(x => !shared.has(x)).join("\n\n"))}</div>`);
+  const imgs = [...new Set(p.members.flatMap(m => QB.imagesOf(m.it).exp))];
+  return `<div class="subq"><div class="top"><span class="qid">解説（まとめ）</span></div>${parts.join("")}${shared.size ? `<div class="exp">${esc([...shared].join("\n\n"))}</div>` : ""}${imgTags(imgs)}</div>`;
+}
 function showReview(top) {
   const pages = sesPages();
   if (!pages.length) { toast("この演習の問題が見つかりません（削除された可能性）"); closeSession(!ses.keys.length); return; }
@@ -387,7 +396,7 @@ function showReview(top) {
     return `<div class="${series ? "subq" : ""}${solve ? "" : " done"}">
       ${series ? `<div class="top"><span class="qid">${esc(it.label)}</span>${leechPill(d)}${solve ? `<span class="pill miss">✖ ${d.miss}回間違い・解く</span>` : '<span class="pill ok">○ QBで正解（答えは選択済み）</span>'}${ans.length > 1 && solve ? `<span>（${ans.length}つ選ぶ）</span>` : ""}</div>` : ""}
       <div class="q">${esc(body)}</div><div class="choices">${ch}</div>
-      ${shown ? `<div class="exp">正解：${esc(it.answer)}\n\n${esc(it.explanation)}</div>${imgTags(im.exp)}
+      ${shown ? `${series ? "" : `<div class="exp">正解：${esc(it.answer)}\n\n${esc(it.explanation)}</div>${imgTags(im.exp)}`}
         ${solve ? `<div class="judge">自己判定：${judgeBtns(it.id, st.judge)}<span class="note">${st.judge ? "この判定で記録しました" : "判定を選ぶと記録します"}</span></div>` : ""}` : ""}</div>`;
   }).join("");
   const tags = tagsOfPage(p);
@@ -403,7 +412,7 @@ function showReview(top) {
       <input id="tagIn" list="tagList" placeholder="タグを追加" enterkeyhint="done" autocomplete="off"><button id="tagAdd">追加</button>
       <datalist id="tagList">${known.map(t => `<option value="${esc(t)}">`).join("")}</datalist>
       ${known.slice(0, 8).map(t => `<button class="chip pick" data-addtag="${esc(t)}">+#${esc(t)}</button>`).join("")}</div>
-    ${series ? `<div class="q">${esc(pre)}</div>` : ""}${imgTags(qImgs)}${subs}</article>
+    ${series ? `<div class="q">${esc(pre)}</div>` : ""}${imgTags(qImgs)}${subs}${series && shown ? seriesExp(p) : ""}</article>
     <div class="nav"><button id="rvPrev"${ses.pos ? "" : " disabled"}>← 前の問題</button>
       ${shown ? `<button class="go" id="rvNext">${last ? "終わる" : "次の問題 →"}</button>` : `<button class="go" id="rvShow">答え合わせ</button>`}
       ${shown || last ? "" : '<button id="rvSkip">次の問題 →</button>'}</div>

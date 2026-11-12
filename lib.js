@@ -22,9 +22,10 @@ const QB = {
   counts: (t) => !(t && t.free),
 
   // ---- 出す日（はしご）：1日→3日→7日→14日→30日→克服 ----
-  // 1日1回として数え、その日のいちばん悪い評価を使う（最初が○でも後で×なら×）。×＝一番下（翌日）、△＝2段下がる、○＝1段上、◎＝2段上。
+  // 1日1回として数え、その日のいちばん悪い評価を使う（最初が○でも後で×なら×）。×＝一番下（翌日）、△＝1段下がる（ただし3日より短くしない。2026-11-12〜、△まで翌日に出すと総復習が多すぎるため）、○＝1段上、◎＝2段上。
   // 出す日より前に解いて正解したときは、段も出す日も変えない（間違えたときは数える）。
   LADDER: [1, 3, 7, 14, 30],
+  TRI_MIN: 1, // △のときのいちばん下の段（LADDER[1]＝3日後）
   EXAM_DATE: "2027-02-14", // 国家試験の日（要確認）。この3日前より後には出さない
   EXAM_MARGIN: 3,
   LEECH: 3, // 苦手にする「×・△にした日数」（Anki のリーチのしきい値。Anki は8回だが、国試まで短いので3日）
@@ -56,7 +57,7 @@ const QB = {
     for (const { day, judge } of days) {
       const early = due && day < due;
       if (judge === "×") step = 0;
-      else if (judge === "△") step = Math.max(0, step - 2);
+      else if (judge === "△") step = Math.max(QB.TRI_MIN, step - 1);
       else if (early) continue;
       else step += judge === "◎" ? 2 : 1;
       if (step >= QB.LADDER.length) { step = QB.LADDER.length; due = null; continue; } // 克服
