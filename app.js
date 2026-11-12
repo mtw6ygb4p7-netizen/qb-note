@@ -75,7 +75,7 @@ let judgeSel = lsGet("qb_judge", "all");
 if (!["all", "x", "t"].includes(judgeSel)) judgeSel = "all";
 const JUDGE_NAME = { x: "×だけ", t: "△だけ" };
 // その問題が×か△か：最後に間違えたときの判定（臨時の演習は数えない）。今日間違えたのタブは今日の判定（その日のいちばん悪い評価）
-const judgeOf = r => tab === "today" && r.d.missToday ? r.d.todayFirst : r.d.lastMissJudge;
+const judgeOf = r => tab === "today" && r.tw ? r.tw : r.d.lastMissJudge;
 const judgeOk = (r, j = judgeSel) => j === "all" || judgeOf(r) === (j === "x" ? "×" : "△");
 const setTab = t => { tab = t; lsSet("qb_tab", t); render(); };
 
@@ -109,28 +109,37 @@ const pickTab = (t, all, day) =>
   : t === "subject" ? all.filter(r => !r.d.cleared && !r.it.exam)
   : t === "exam" ? all.filter(r => !r.d.cleared && r.it.exam)
   : t === "date" ? all.filter(r => !r.d.cleared)
-  : all.filter(r => !r.d.cleared && r.d.lastMissAt && ld(r.d.lastMissAt) === day);
+  // 今日間違えた：今日×・△にした問題。総復習でも、QBでも、臨時の演習（科目別などから解いた分）でも入れる（2026-11-12〜）。
+  // 復習の予定（はしご・間違い回数・苦手）に効くのは今までどおり、臨時の演習ではない記録だけ（QB.derive は変えていない）
+  : all.filter(r => !r.d.cleared && r.tw);
 const tabName = t => ({ due: "総復習", today: "今日間違えた", subject: "科目別", exam: "年度別", date: "日付別", tag: "タグ「" + curTag + "」", leech: "苦手", cleared: "克服済み" }[t] || "");
 
 const subNo = it => Number((String(it.label || "").match(/(\d+)$/) || [])[1] || 0);
 // 今日の復習が済んだか：今日×・△になった問題を、そのあとアプリで解き直した（臨時の演習の記録がある）。
 // 復習の予定（はしご）は変えない。今日の復習の残りの数を減らし、一覧の後ろに回すためだけに使う
-const revDone = d => d.missToday && d.attempts.some(t => t.free && t.judge && QB.dayKey(t.at) === today() && (!d.lastMissAt || t.at > d.lastMissAt));
+const revDone = (d, miss) => !!miss && d.attempts.some(t => t.free && t.judge && QB.dayKey(t.at) === today() && t.at > miss.at);
+// 今日の×・△（練習も含む）：いちばん悪い判定 tw と、最後に間違えた記録 last
+function todayMiss(d) {
+  const day = today(), list = d.attempts.filter(t => QB.isMiss(t.judge) && QB.dayKey(t.at) === day);
+  return { tw: list.length ? (list.some(t => t.judge === "×") ? "×" : "△") : null, last: list[list.length - 1] || null };
+}
 const revTab = () => tab === "today";
 // 今日間違えた：QBで間違えたか（総復習で間違えたものと分ける。2026-11-10〜）。
 // QBの記録（拡張機能が画面・取り込みで記録した分）には src が無い。アプリで解いた記録には src（端末名）がある
-const missTodayBy = (d, fromApp) => d.attempts.some(t => !!t.src === fromApp && !t.free && QB.isMiss(t.judge) && QB.dayKey(t.at) === today());
+// kind：qb＝QBで間違えた／due＝総復習で間違えた／free＝臨時の演習（科目別などから解いた練習）で間違えた
+const missTodayBy = (d, kind) => d.attempts.some(t => QB.isMiss(t.judge) && QB.dayKey(t.at) === today()
+  && (kind === "free" ? !!t.free : !t.free && !!t.src === (kind === "due")));
 const pageRevDone = p => p.picked.every(r => r.rv);
 function view() {
-  const every = allItems().map(it => { const d = QB.derive(it); return { it, d, s: QB.stats(d.attempts), rv: revDone(d) }; });
+  const every = allItems().map(it => { const d = QB.derive(it), tm = todayMiss(d); return { it, d, s: QB.stats(d.attempts), tw: tm.tw, rv: revDone(d, tm.last) }; });
   // 連問のまとまり（○の小問＝companion も含む）
   const byKey = new Map();
   for (const r of every) { const k = QB.seriesKey(r.it); if (!byKey.has(k)) byKey.set(k, []); byKey.get(k).push(r); }
   for (const g of byKey.values()) g.sort((a, b) => subNo(a.it) - subNo(b.it));
   const all = every.filter(r => r.d.miss > 0);
   let pick = pickTab(tab, all, ld(new Date().toISOString())).filter(FILTERS[$("filter").value] || FILTERS.all);
-  const src = $("todaySrc").value; // qb：QBで間違えた問題だけ／due：総復習で間違えた問題だけ（アプリの記録で、臨時の演習ではないもの）
-  if (tab === "today" && (src === "qb" || src === "due")) pick = pick.filter(r => missTodayBy(r.d, src === "due")); // 1問ずつ解く・見出しから解くも、この範囲だけ
+  const src = $("todaySrc").value; // qb：QBで間違えた問題だけ／due：総復習で間違えた問題だけ／free：臨時の演習で間違えた問題だけ
+  if (tab === "today" && src !== "all") pick = pick.filter(r => missTodayBy(r.d, src)); // 1問ずつ解く・見出しから解くも、この範囲だけ
   const base = pick; // ×・△で分ける前（切り替えの数を出す用）
   pick = pick.filter(r => judgeOk(r));
   // 総復習の並び：まだ解いていない → 遅れが長い → 直近が× → 必修
