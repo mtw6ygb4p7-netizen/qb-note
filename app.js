@@ -217,8 +217,9 @@ function grouped(pages) {
   return keys.map(k => { const gk = tab + ":" + k, n = g.get(k).reduce((s, p) => s + p.picked.length, 0);
     // 見出しの「この中を解く」：その見出しの問題だけで臨時の演習（総復習のタブでは総復習として数える）
     // 今日の復習・今日間違えた：まだ復習していない数（残り）も出す
-    const rest = g.get(k).reduce((s, p) => s + p.picked.filter(r => !r.rv).length, 0);
-    const cnt = revTab() ? (rest ? `残り${rest}／${n}問` : `${n}問・済み`) : `${n}問`;
+    // 総復習：今日まだ解いていない数（見出しの中だけ解いても、その分だけ減る）
+    const rest = g.get(k).reduce((s, p) => s + p.picked.filter(r => tab === "due" ? !r.d.doneToday : !r.rv).length, 0);
+    const cnt = revTab() || tab === "due" ? (rest ? `残り${rest}／${n}問` : `${n}問・済み`) : `${n}問`;
     return `<details class="grp" data-gk="${esc(gk)}"${one || openGroups.has(gk) ? " open" : ""}><summary class="subj">${esc(label(k))}<span>${cnt}</span>`
       + `<button class="grpgo" data-grp="${esc(k)}" data-gname="${esc(label(k))}">この中を解く</button></summary>`
       + g.get(k).map(card).join("") + `</details>`; }).join("");
