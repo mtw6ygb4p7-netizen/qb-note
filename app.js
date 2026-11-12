@@ -70,6 +70,13 @@ const TABS = ["due", "today", "subject", "exam", "date", "tag", "leech", "cleare
 let tab = lsGet("qb_tab", "due");
 if (!TABS.includes(tab)) tab = "due";
 let curTag = lsGet("qb_tag", "");
+// ×・△で分ける（2026-11-12〜。どのタブでも、1問ずつ解く・見出しから解く・この問題を解くもこの範囲だけ）。端末に覚える
+let judgeSel = lsGet("qb_judge", "all");
+if (!["all", "x", "t"].includes(judgeSel)) judgeSel = "all";
+const JUDGE_NAME = { x: "×だけ", t: "△だけ" };
+// その問題が×か△か：最後に間違えたときの判定（臨時の演習は数えない）。今日間違えたのタブは今日の判定（その日のいちばん悪い評価）
+const judgeOf = r => tab === "today" && r.d.missToday ? r.d.todayFirst : r.d.lastMissJudge;
+const judgeOk = (r, j = judgeSel) => j === "all" || judgeOf(r) === (j === "x" ? "×" : "△");
 const setTab = t => { tab = t; lsSet("qb_tab", t); render(); };
 
 const SORTS = { miss: (a, b) => b.d.miss - a.d.miss || (a.d.lastMissAt < b.d.lastMissAt ? 1 : -1),
@@ -90,10 +97,10 @@ const FILTERS = { all: () => true,
 // 国試の回（114A91 → 114）。QBオリジナルなど回の無い問題は ""
 const examNo = it => { const v = Number(it.examVersion || (String(it.label || "").match(/^改?(\d{2,3})[A-Z追]/) || [])[1]); return v >= 80 && v <= 130 ? String(v) : ""; };
 // タブごとの問題（今日の復習・総復習・今日間違えた・克服済みは拡張機能のルールと同じ分け方）
-const pickTab = (t, all, day) => t === "review" ? all.filter(r => r.d.missToday)
+const pickTab = (t, all, day) =>
   // 総復習＝今朝の時点で出す日が来ていた問題。今日もう解いた問題（×・△でも）は「済み」で、今日はもう出さない（問題演習なので1日1回。
   // 同じ日に解き直させる「今日の復習」は2026-11-10にやめた。間違えた問題は、はしごで次の日以降に出る）
-  : t === "due" ? all.filter(r => r.d.inToday)
+  t === "due" ? all.filter(r => r.d.inToday)
   : t === "cleared" ? all.filter(r => r.d.cleared)
   : t === "tag" ? all.filter(r => curTag && (r.it.tags || []).includes(curTag))
   // 苦手＝×・△にした日数が QB.LEECH 日に達した問題（克服したものは克服済みへ）
@@ -103,13 +110,13 @@ const pickTab = (t, all, day) => t === "review" ? all.filter(r => r.d.missToday)
   : t === "exam" ? all.filter(r => !r.d.cleared && r.it.exam)
   : t === "date" ? all.filter(r => !r.d.cleared)
   : all.filter(r => !r.d.cleared && r.d.lastMissAt && ld(r.d.lastMissAt) === day);
-const tabName = t => ({ review: "今日の復習", due: "総復習", today: "今日間違えた", subject: "科目別", exam: "年度別", date: "日付別", tag: "タグ「" + curTag + "」", leech: "苦手", cleared: "克服済み" }[t] || "");
+const tabName = t => ({ due: "総復習", today: "今日間違えた", subject: "科目別", exam: "年度別", date: "日付別", tag: "タグ「" + curTag + "」", leech: "苦手", cleared: "克服済み" }[t] || "");
 
 const subNo = it => Number((String(it.label || "").match(/(\d+)$/) || [])[1] || 0);
 // 今日の復習が済んだか：今日×・△になった問題を、そのあとアプリで解き直した（臨時の演習の記録がある）。
 // 復習の予定（はしご）は変えない。今日の復習の残りの数を減らし、一覧の後ろに回すためだけに使う
 const revDone = d => d.missToday && d.attempts.some(t => t.free && t.judge && QB.dayKey(t.at) === today() && (!d.lastMissAt || t.at > d.lastMissAt));
-const revTab = () => tab === "review" || tab === "today";
+const revTab = () => tab === "today";
 // 今日間違えた：QBで間違えたか（総復習で間違えたものと分ける。2026-11-10〜）。
 // QBの記録（拡張機能が画面・取り込みで記録した分）には src が無い。アプリで解いた記録には src（端末名）がある
 const missTodayBy = (d, fromApp) => d.attempts.some(t => !!t.src === fromApp && !t.free && QB.isMiss(t.judge) && QB.dayKey(t.at) === today());
@@ -124,11 +131,13 @@ function view() {
   let pick = pickTab(tab, all, ld(new Date().toISOString())).filter(FILTERS[$("filter").value] || FILTERS.all);
   const src = $("todaySrc").value; // qb：QBで間違えた問題だけ／due：総復習で間違えた問題だけ（アプリの記録で、臨時の演習ではないもの）
   if (tab === "today" && (src === "qb" || src === "due")) pick = pick.filter(r => missTodayBy(r.d, src === "due")); // 1問ずつ解く・見出しから解くも、この範囲だけ
+  const base = pick; // ×・△で分ける前（切り替えの数を出す用）
+  pick = pick.filter(r => judgeOk(r));
   // 総復習の並び：まだ解いていない → 遅れが長い → 直近が× → 必修
   if (tab === "due") pick.sort((a, b) => a.d.doneToday - b.d.doneToday || (a.d.dueBefore < b.d.dueBefore ? -1 : a.d.dueBefore > b.d.dueBefore ? 1 : 0)
     || (b.d.lastMissJudge === "×") - (a.d.lastMissJudge === "×") || !!b.it.required - !!a.it.required);
   else pick.sort((a, b) => (revTab() ? a.rv - b.rv : 0) || SORTS[$("sort").value](a, b)); // 今日の復習：済んだ問題は後ろへ
-  return { all, pick, byKey };
+  return { all, pick, base, byKey };
 }
 // 一覧の問題 → ページ（連問は1ページにまとめる。小問は全部入れる）
 function pagesOf(rows, byKey) {
@@ -250,29 +259,41 @@ function render() {
   let v = view();
   renderTagBar(v.all); // タグの表示では、選んでいるタグが決まってから一覧を作り直す
   if (tab === "tag") v = view();
-  const { all, pick: picked, byKey } = v;
+  const { all, pick: picked, base, byKey } = v;
   const day = today();
   const active = all.filter(r => !r.d.cleared).length;
   const set = all.filter(r => r.d.inToday), done = set.filter(r => r.d.doneToday).length;
   const soon = n => all.filter(r => !r.d.cleared && r.d.due && r.d.due > day && r.d.due <= QB.addDays(day, n)).length;
   $("stats").innerHTML = `<span><b>${set.length - done}</b>問 総復習の残り（済み${done}）</span><span><b>${soon(1)}</b>問 明日</span><span><b>${soon(7)}</b>問 7日以内</span><span><b>${active}</b>問 要復習</span><span><b>${all.length - active}</b>問 克服済み</span>`;
-  $("dueTab").setAttribute("aria-pressed", String(tab === "due"));
   $("todaySrc").hidden = tab !== "today";
-  $("dueTab").textContent = `総復習を始める（残り${set.length - done}問）`;
-  $("start").textContent = tab === "due" ? "1問ずつ解く（復習の予定に反映）" : "1問ずつ解く（臨時・復習の予定には反映しない）";
+  $("sort").hidden = tab === "due"; // 総復習は決まった並び（まだ解いていない → 遅れが長い → ×）
+  // ×・△の切り替え：今のタブ（絞り込み後）の問題数。総復習はまだ解いていない数
+  const left = rows => tab === "due" ? rows.filter(r => !r.d.doneToday) : rows;
+  document.querySelectorAll("#judgeSeg button").forEach(b => {
+    b.setAttribute("aria-pressed", String(b.dataset.j === judgeSel));
+    b.querySelector("small").textContent = left(base.filter(r => judgeOk(r, b.dataset.j))).length;
+  });
+  // 開始ボタンは1つ：総復習のタブでは総復習（予定に反映）、ほかは臨時の演習
+  const n = left(picked).length, jn = JUDGE_NAME[judgeSel] ? JUDGE_NAME[judgeSel] + "・" : "";
+  $("start").textContent = tab === "due" ? `総復習を始める（${jn}残り${n}問）` : `1問ずつ解く（${jn}${n}問）`;
+  $("start").disabled = !n;
+  $("startNote").textContent = tab === "due" ? "結果が復習の予定に反映されます" : "臨時の演習：復習の予定には反映しません";
   const ldToday = ld(new Date().toISOString());
   // タブの下の小さな字：問題数（未演習＝登録してから一度も復習していない数）。タグはタグの数
   document.querySelectorAll("#tabs button, #tabs2 button").forEach(b => {
     b.setAttribute("aria-pressed", String(b.dataset.tab === tab));
     const sm = b.querySelector("small");
     if (b.dataset.tab === "tag") { sm.textContent = `${new Set(all.flatMap(r => r.it.tags || [])).size}種類`; return; }
-    const got = pickTab(b.dataset.tab, all, ldToday), un = got.filter(r => r.d.unreviewed).length;
+    const got = pickTab(b.dataset.tab, all, ldToday);
+    if (b.dataset.tab === "due") { const d = got.filter(r => r.d.doneToday).length; sm.innerHTML = `残り${got.length - d}問<br>済み${d}`; return; }
+    const un = got.filter(r => r.d.unreviewed).length;
     const unText = b.dataset.tab === "cleared" ? "" : `未演習${un}`;
     if (b.closest("#tabs")) sm.innerHTML = `${got.length}問<br>${unText}`; else sm.textContent = `${got.length}問` + (unText ? `（${unText}）` : "");
   });
   const pages = pagesOf(picked, byKey);
+  setTimeout(openToggleLabel);
   $("list").innerHTML = pages.length ? grouped(pages)
-    : `<div class="empty"><b>${all.length ? (tab === "review" ? "今日登録した問題はありません" : tab === "due" ? "今日の総復習はありません（終わりました）" : tab === "tag" ? "タグの付いた問題はありません" : tab === "leech" ? `苦手の問題はありません（×・△が${QB.LEECH}日になると入ります）` : "この表示に該当する問題はありません") : ready ? "問題がまだありません" : "読み込み中…"}</b>${all.length || !ready ? "" : "「同期の設定」で合鍵を保存してから「同期」を押してください。"}</div>`;
+    : `<div class="empty"><b>${all.length ? (base.length && judgeSel !== "all" ? `この表示に${judgeSel === "x" ? "×" : "△"}の問題はありません（上の「×・△」で全部に戻せます）` : tab === "due" ? "今日の総復習はありません（終わりました）" : tab === "tag" ? "タグの付いた問題はありません" : tab === "leech" ? `苦手の問題はありません（×・△が${QB.LEECH}日になると入ります）` : "この表示に該当する問題はありません") : ready ? "問題がまだありません" : "読み込み中…"}</b>${all.length || !ready ? "" : "「同期の設定」で合鍵を保存してから「同期」を押してください。"}</div>`;
 }
 
 // ---- 1問ずつ解く ----
@@ -314,7 +335,7 @@ function startSession(grp, gname, one) {
   if (!pages.length) { if (tab === "due") toast("今日の総復習は終わりました。間違えた問題は、次の日以降に出ます"); return; }
   if (ses && !confirm(`途中の演習（${ses.name} ${ses.pos + 1}/${ses.keys.length}）があります。やめて新しく始めますか？`)) return;
   const free = tab !== "due";
-  ses = { id: Date.now().toString(36), name: tabName(tab) + (gname ? "：" + gname : ""), tab, free, keys: pages.map(p => p.key), pos: 0, st: {}, shown: {}, open: true };
+  ses = { id: Date.now().toString(36), name: tabName(tab) + (JUDGE_NAME[judgeSel] ? `（${JUDGE_NAME[judgeSel]}）` : "") + (gname ? "：" + gname : ""), tab, free, keys: pages.map(p => p.key), pos: 0, st: {}, shown: {}, open: true };
   saveSes();
   openSession();
 }
@@ -798,6 +819,7 @@ $("list").addEventListener("toggle", e => {
   if (!g.classList || !g.classList.contains("grp")) return;
   if (g.open) openGroups.add(g.dataset.gk); else openGroups.delete(g.dataset.gk);
   lsSet("qb_open_groups", [...openGroups]);
+  openToggleLabel();
 }, true);
 $("list").addEventListener("click", e => {
   const b = e.target.closest("[data-act]");
@@ -815,9 +837,11 @@ $("list").addEventListener("click", e => {
   }
   render();
 });
-$("openAll").onclick = () => document.querySelectorAll("#list details.grp").forEach(g => { g.open = true; });
-$("closeAll").onclick = () => document.querySelectorAll("#list details.grp").forEach(g => { g.open = false; });
-$("dueTab").onclick = () => setTab("due");
+// すべて開く／すべて閉じる（1つのボタン。閉じた見出しがあれば開く、全部開いていれば閉じる）
+const grpEls = () => [...document.querySelectorAll("#list details.grp")];
+function openToggleLabel() { const g = grpEls(); $("openToggle").hidden = g.length < 2; $("openToggle").textContent = g.some(x => !x.open) ? "すべて開く" : "すべて閉じる"; }
+$("openToggle").onclick = () => { const g = grpEls(), open = g.some(x => !x.open); g.forEach(x => { x.open = open; }); setTimeout(openToggleLabel); };
+$("judgeSeg").onclick = e => { const b = e.target.closest("[data-j]"); if (!b) return; judgeSel = b.dataset.j; lsSet("qb_judge", judgeSel); render(); };
 // いま表示している一覧を1問ずつ（解き直して○でも、今日の復習の記録は今日のいちばん悪い評価のまま）
 $("start").onclick = () => startSession();
 // 見出しの「この中を解く」（押しても見出しは開閉しない）

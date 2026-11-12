@@ -59,9 +59,15 @@ h1{font-size:22px;margin:0;letter-spacing:.02em}
 button,select{font:inherit;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:7px 12px;cursor:pointer}
 button.go{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:700}
 button:focus-visible,select:focus-visible,summary:focus-visible,.pickable:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.controls.main button{flex:1;max-width:240px;padding:10px 14px;font-weight:700}
-#reviewTab,#dueTab{border-color:var(--accent);color:var(--accent)}
-#reviewTab[aria-pressed="true"],#dueTab[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink)}
+.controls.main{flex-direction:column;align-items:stretch;gap:4px}
+.controls.main button{padding:12px 14px;font-size:16px}
+.controls.main .note{text-align:center}
+.seg button small{font-size:12px;opacity:.8;margin-left:2px}
+.seg button.j-x{color:var(--miss)}.seg button.j-t{color:var(--tri)}
+.seg button.j-x[aria-pressed="true"]{background:var(--miss);color:var(--accent-ink)}
+.seg button.j-t[aria-pressed="true"]{background:var(--tri);color:var(--accent-ink)}
+.controls.sub{margin-top:4px;font-size:13px}
+.controls.sub select,.controls.sub button{font-size:13px;padding:5px 10px}
 .item{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-block:10px}
 .top{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;font-size:13px;color:var(--sub)}
 .qid{font-weight:700;color:var(--accent);font-size:15px}
@@ -100,7 +106,7 @@ details.grp>summary.subj>span{margin-left:auto;white-space:nowrap;font-size:12px
 .pill.ok{color:var(--ok)}
 .stat{font-size:12px;color:var(--sub);font-variant-numeric:tabular-nums}
 .pill.leech{color:var(--accent-ink);background:var(--tri);border-color:var(--tri);font-weight:700}
-.tabbar{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin:14px 0 0;border-bottom:3px solid var(--accent)}
+.tabbar{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;margin:14px 0 0;border-bottom:3px solid var(--accent)}
 .tabbar button{border:1px solid var(--line);border-bottom:0;border-radius:10px 10px 0 0;background:var(--card);padding:10px 4px 8px;
   display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;line-height:1.3;font-weight:700;min-width:0}
 .tabbar button .tl{font-size:15px;overflow-wrap:anywhere;text-align:center}
@@ -170,8 +176,9 @@ details.grp>summary.subj>span{margin-left:auto;white-space:nowrap;font-size:12px
 
   <div id="listView">
     <div class="resume" id="resume" hidden></div>
-    <!-- 見出しのタブ（横並び）：今日間違えた｜科目別｜年度別｜タグ。日付別・苦手・克服済みはその下に小さく -->
+    <!-- 見出しのタブ（横並び）：総復習｜今日間違えた｜科目別｜年度別｜タグ。日付別・苦手・克服済みはその下に小さく -->
     <nav class="tabbar" id="tabs" aria-label="表示">
+      <button data-tab="due" aria-pressed="false"><span class="tl">総復習</span><small></small></button>
       <button data-tab="today" aria-pressed="false"><span class="tl">今日<span class="long">間違えた</span></span><small></small></button>
       <button data-tab="subject" aria-pressed="false"><span class="tl">科目別</span><small></small></button>
       <button data-tab="exam" aria-pressed="false"><span class="tl">年度別</span><small></small></button>
@@ -182,11 +189,31 @@ details.grp>summary.subj>span{margin-left:auto;white-space:nowrap;font-size:12px
       <button data-tab="leech" aria-pressed="false"><span class="tl">苦手</span> <small></small></button>
       <button data-tab="cleared" aria-pressed="false"><span class="tl">克服済み</span> <small></small></button>
     </div>
-    <div class="controls main">
-      <button id="dueTab" aria-pressed="true">総復習を始める</button>
-    </div>
+    <!-- 何を解くか：×・△で分ける（どのタブでも）／今日間違えたの範囲／絞り込み → 開始ボタン → 一覧の見方 -->
     <div class="controls">
+      <div class="seg" id="judgeSeg" role="group" aria-label="×・△で分ける" title="最後に間違えたときの判定で分けます（今日間違えたのタブは今日の判定）">
+        <button data-j="all" aria-pressed="true">×・△ <small></small></button>
+        <button class="j-x" data-j="x" aria-pressed="false">×だけ <small></small></button>
+        <button class="j-t" data-j="t" aria-pressed="false">△だけ <small></small></button>
+      </div>
+      <select id="todaySrc" aria-label="今日間違えた問題の範囲" hidden>
+        <option value="all">QB＋総復習で間違えた問題</option>
+        <option value="qb">QBで間違えた問題だけ</option>
+        <option value="due">総復習で間違えた問題だけ</option>
+      </select>
+      <select id="filter" aria-label="絞り込み">
+        <option value="all">絞り込みなし</option>
+        <option value="triRun">△が2回以上続いている</option>
+        <option value="missRun">×・△が2回以上続いている</option>
+        <option value="neverOk">まだ一度も○になっていない</option>
+        <option value="stale">2週間以上解いていない</option>
+      </select>
+    </div>
+    <div class="controls main">
       <button class="go" id="start">1問ずつ解く</button>
+      <span class="note" id="startNote"></span>
+    </div>
+    <div class="controls sub">
       <select id="sort" aria-label="並び順">
         <option value="miss">間違い回数が多い順</option>
         <option value="recent">最近間違えた順</option>
@@ -196,20 +223,7 @@ details.grp>summary.subj>span{margin-left:auto;white-space:nowrap;font-size:12px
         <option value="x">×が多い順</option>
         <option value="triRun">△が続いている順</option>
       </select>
-      <select id="filter" aria-label="絞り込み">
-        <option value="all">すべての問題</option>
-        <option value="triRun">△が2回以上続いている</option>
-        <option value="missRun">×・△が2回以上続いている</option>
-        <option value="neverOk">まだ一度も○になっていない</option>
-        <option value="stale">2週間以上解いていない</option>
-      </select>
-      <select id="todaySrc" aria-label="今日間違えた問題の範囲" hidden>
-        <option value="all">QB＋総復習で間違えた問題</option>
-        <option value="qb">QBで間違えた問題だけ</option>
-        <option value="due">総復習で間違えた問題だけ</option>
-      </select>
-      <button id="openAll">すべて開く</button>
-      <button id="closeAll">すべて閉じる</button>
+      <button id="openToggle">すべて開く</button>
     </div>
     <div class="tagbar" id="tagBar" hidden></div>
     <div id="list"></div>
