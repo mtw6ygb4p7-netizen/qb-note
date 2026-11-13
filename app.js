@@ -331,7 +331,8 @@ function renderResume() {
   $("resumeGo").onclick = () => openSession();
   $("resumeDrop").onclick = () => { if (confirm("途中の演習をやめますか？（解いた記録は残ります）")) { ses = null; saveSes(); render(); } };
 }
-// 演習の結果が復習の予定（はしご）に効くのは「総復習を始める」から解いたときだけ。ほかは臨時の演習（free）
+// 演習の結果が復習の予定（はしご）に効くのは、総復習のタブから、今日まだ解いていない問題を解いたときだけ。
+// ほかのタブと、総復習のタブでも今日もう解いた（済み）問題は臨時の演習（free）
 // grp：見出し（科目・回・日付）の key。指定すると、その見出しの問題だけを解く
 // one：ページの key。指定すると、その問題（連問は1ページ）だけを解く
 function startSession(grp, gname, one) {
@@ -343,8 +344,11 @@ function startSession(grp, gname, one) {
   if (tab === "due" && one === undefined) pages = pages.filter(p => p.picked.some(r => !r.d.doneToday));
   if (!pages.length) { if (tab === "due") toast("今日の総復習は終わりました。間違えた問題は、次の日以降に出ます"); return; }
   if (ses && !confirm(`途中の演習（${ses.name} ${ses.pos + 1}/${ses.keys.length}）があります。やめて新しく始めますか？`)) return;
-  const free = tab !== "due";
-  ses = { id: Date.now().toString(36), name: tabName(tab) + (JUDGE_NAME[judgeSel] ? `（${JUDGE_NAME[judgeSel]}）` : "") + (gname ? "：" + gname : ""), tab, free, keys: pages.map(p => p.key), pos: 0, st: {}, shown: {}, open: true };
+  // 総復習でも、今日もう解いた（済み）問題は予定に数えない。始めた時点の済みを覚えておく（解くと済みになるため）。
+  // 解く問題がすべて済みなら、その演習は臨時の演習にする
+  const done = tab === "due" ? pages.flatMap(p => p.picked.filter(r => r.d.doneToday).map(r => r.it.id)) : [];
+  const free = tab !== "due" || pages.every(p => p.picked.every(r => r.d.doneToday));
+  ses = { id: Date.now().toString(36), name: tabName(tab) + (JUDGE_NAME[judgeSel] ? `（${JUDGE_NAME[judgeSel]}）` : "") + (gname ? "：" + gname : ""), tab, free, done, keys: pages.map(p => p.key), pos: 0, st: {}, shown: {}, open: true };
   saveSes();
   openSession();
 }
@@ -404,7 +408,8 @@ function showReview(top) {
   const nAns = !series ? answersOf(p.lead.it).length : 0;
   const last = ses.pos + 1 >= pages.length;
   const y = window.scrollY;
-  const mode = ses.free ? '<span class="pill free">臨時の演習・復習の予定には反映しません</span>' : '<span class="pill due">総復習・復習の予定に反映します</span>';
+  const done = ses.done || [], pageFree = ses.free || p.members.every(r => done.includes(r.it.id));
+  const mode = pageFree ? `<span class="pill free">${ses.free ? "臨時の演習" : "今日もう解いた問題"}・復習の予定には反映しません</span>` : '<span class="pill due">総復習・復習の予定に反映します</span>';
   $("reviewView").innerHTML = `<div class="meta">${mode} ${esc(ses.name)} ${ses.pos + 1} / ${pages.length}${nAns > 1 ? "　（" + nAns + "つ選ぶ）" : ""}</div>
     <article class="item"><div class="top"><span class="qid">${esc(pageLabel(p))}</span>${p.lead.it.required ? '<span class="pill due">必修</span>' : ""}
       ${series ? '<span class="pill">連問</span>' : `${leechPill(p.lead.d)}<span class="pill miss">${p.lead.d.miss}回間違い</span>`}</div>
@@ -577,11 +582,11 @@ function recordAttempt(it, st) {
   const ans = answersOf(it), chosen = st.chosen;
   const result = !chosen.length || !ans.length ? null : ans.length === chosen.length && ans.every(n => chosen.includes(n)) ? "正解" : "不正解";
   const ex = local.attempts.find(t => t.key === key);
-  const free = ses.free ? { free: true } : {}; // 臨時の演習：履歴には残すが、復習の予定・間違い回数・苦手には数えない（QB.counts）
+  const free = ses.free || (ses.done || []).includes(it.id) ? { free: true } : {}; // 臨時の演習・総復習で始めた時点で済みの問題：履歴には残すが、復習の予定・間違い回数・苦手には数えない（QB.counts）
   if (ex) Object.assign(ex, { judge: st.judge, chosen: chosen.join(","), result }, free);
   else local.attempts.push({ qid: it.id, key, at: new Date().toISOString(), judge: st.judge, src: dev(), chosen: chosen.join(","), result, ...free });
   const now = leechOf(it.id);
-  if (!ses.free && now && now.leech && !(was && was.leech)) toast(`${it.label}：×・△が${now.missDays}日目です。定着しにくい問題として「苦手」に入れました`);
+  if (!free.free && now && now.leech && !(was && was.leech)) toast(`${it.label}：×・△が${now.missDays}日目です。定着しにくい問題として「苦手」に入れました`);
   persistLocal();
 }
 function persistLocal() { // 端末の中に保存するだけ。サーバーへ送るのは「同期する」を押したとき
