@@ -326,6 +326,15 @@ function render() {
 // ses：{id, name, tab, keys:[ページのkey], pos, st:{qid:{chosen:[], judge}}, shown:{ページのkey: true}, open}
 let ses = lsGet("qb_session", null);
 const saveSes = () => lsSet("qb_session", ses);
+// 途中の演習は、始めた日のうちだけ続けられる（2026-11-17〜）。前の日の演習は終わりにする（解いた記録は残る）。
+// iPhoneで11/10に始めた臨時の演習が11/17の朝に「続き」として開き、総復習のつもりで解いた27問が予定に数えられなかったため
+const sesDay = s => s.day || QB.dayKey(new Date(parseInt(s.id, 36) || 0).toISOString()); // 以前の演習は day が無いので、id（始めた時刻）から
+function dropStaleSes() {
+  if (!ses || sesDay(ses) === today()) return false;
+  ses = null; saveSes();
+  toast("前の日の途中の演習は終わりにしました（解いた記録は残っています）。今日の総復習は「総復習」のタブから始めてください", 8000);
+  return true;
+}
 let pageCache = null; // 今のセッションのページ（データが変わったら作り直す）
 function sesPages() {
   const { byKey } = view();
@@ -342,7 +351,7 @@ function renderResume() {
   el.hidden = false;
   el.innerHTML = `<span>途中の演習：<b>${esc(ses.name)}</b> ${qPosText(ses, Math.min(ses.pos, ses.keys.length - 1))}問目</span>
     <button class="go" id="resumeGo">続きから</button><button id="resumeDrop">やめる</button>`;
-  $("resumeGo").onclick = () => openSession();
+  $("resumeGo").onclick = () => { if (dropStaleSes()) render(); else openSession(); };
   $("resumeDrop").onclick = () => { if (confirm("途中の演習をやめますか？（解いた記録は残ります）")) { ses = null; saveSes(); render(); } };
 }
 // 演習の結果が復習の予定（はしご）に効くのは、総復習のタブから、今日まだ解いていない問題を解いたときだけ。
@@ -364,7 +373,7 @@ function startSession(grp, gname, one) {
   const free = tab !== "due" || pages.every(p => p.picked.every(r => r.d.doneToday));
   // cnt：ページごとの問題数（連問は1ページに小問が複数。表示は問題数で数える）
   const cnt = Object.fromEntries(pages.map(p => [p.key, p.picked.filter(r => tab !== "due" || !r.d.doneToday).length || 1]));
-  ses = { id: Date.now().toString(36), name: tabName(tab) + (JUDGE_NAME[judgeSel] ? `（${JUDGE_NAME[judgeSel]}）` : "") + (gname ? "：" + gname : ""), tab, free, done, keys: pages.map(p => p.key), cnt, pos: 0, st: {}, shown: {}, open: true };
+  ses = { id: Date.now().toString(36), day: today(), name: tabName(tab) + (JUDGE_NAME[judgeSel] ? `（${JUDGE_NAME[judgeSel]}）` : "") + (gname ? "：" + gname : ""), tab, free, done, keys: pages.map(p => p.key), cnt, pos: 0, st: {}, shown: {}, open: true };
   saveSes();
   openSession();
 }
@@ -896,7 +905,11 @@ addEventListener("offline", () => { if (!inPractice()) render(); });
 let lastDay = today();
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) return;
-  if (today() !== lastDay) { lastDay = today(); if (!inPractice()) render(); }
+  if (today() !== lastDay) {
+    lastDay = today();
+    if (dropStaleSes()) { $("reviewView").hidden = true; $("listView").hidden = false; }
+    if (!inPractice()) render();
+  }
 });
 
 // ---- 起動 ----
@@ -917,6 +930,7 @@ document.addEventListener("visibilitychange", () => {
   } catch (e) { toast("端末の保存領域を開けませんでした（" + (e && e.message || e) + "）"); }
   ready = true;
   showGhForm();
+  dropStaleSes();
   if (ses && ses.open) openSession(); else render(); // 解いている途中で閉じたなら、その問題から
   // 端末の保存を消されにくくする（ホーム画面に置いたアプリは通常消されない）
   try { if (navigator.storage && navigator.storage.persist) await navigator.storage.persist(); } catch (e) {}
