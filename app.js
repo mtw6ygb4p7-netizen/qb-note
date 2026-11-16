@@ -128,7 +128,21 @@ const revTab = () => tab === "today";
 // QBの記録（拡張機能が画面・取り込みで記録した分）には src が無い。アプリで解いた記録には src（端末名）がある
 // kind：qb＝QBで間違えた／app＝このアプリの演習（総復習・練習）で間違えた（QBの記録には src が無い）
 const missTodayBy = (d, kind) => d.attempts.some(t => QB.isMiss(t.judge) && QB.dayKey(t.at) === today() && !!t.src === (kind === "app"));
-const pageRevDone = p => p.picked.every(r => r.rv);
+// 演習の進み具合を問題数で数える（連問は1ページに小問が複数）：{from, to, total}。古い演習で cnt が無いときは1ページ＝1問
+function qPos(s, pos) {
+  if (!s.cnt) { // 問題数を覚えていない古い演習：今のデータから、まだ解く問題（間違いが残る小問）の数を数えて保存する
+    const { byKey } = view(), dn = s.done || [];
+    s.cnt = Object.fromEntries(s.keys.map(k => [k, (byKey.get(k) || []).filter(m => m.d.miss > 0 && !dn.includes(m.it.id)).length || 1]));
+    saveSes();
+  }
+  const c = k => (s.cnt && s.cnt[k]) || 1;
+  const before = s.keys.slice(0, pos).reduce((a, k) => a + c(k), 0);
+  const total = s.keys.reduce((a, k) => a + c(k), 0);
+  const n = s.keys[pos] !== undefined ? c(s.keys[pos]) : 1;
+  return { from: before + 1, to: before + n, total };
+}
+const qPosText = (s, pos) => { const q = qPos(s, pos); return `${q.from}${q.to > q.from ? "〜" + q.to : ""} / ${q.total}`; };
+const pageRevDone =p => p.picked.every(r => r.rv);
 function view() {
   const every = allItems().map(it => { const d = QB.derive(it), tm = todayMiss(d); return { it, d, s: QB.stats(d.attempts), tw: tm.tw, rv: revDone(d, tm.last) }; });
   // 連問のまとまり（○の小問＝companion も含む）
@@ -326,7 +340,7 @@ function renderResume() {
   const el = $("resume");
   if (!ses || ses.open) { el.hidden = true; return; }
   el.hidden = false;
-  el.innerHTML = `<span>途中の演習：<b>${esc(ses.name)}</b> ${Math.min(ses.pos + 1, ses.keys.length)} / ${ses.keys.length}問目</span>
+  el.innerHTML = `<span>途中の演習：<b>${esc(ses.name)}</b> ${qPosText(ses, Math.min(ses.pos, ses.keys.length - 1))}問目</span>
     <button class="go" id="resumeGo">続きから</button><button id="resumeDrop">やめる</button>`;
   $("resumeGo").onclick = () => openSession();
   $("resumeDrop").onclick = () => { if (confirm("途中の演習をやめますか？（解いた記録は残ります）")) { ses = null; saveSes(); render(); } };
@@ -343,12 +357,14 @@ function startSession(grp, gname, one) {
   // 総復習：今日もう解いた問題は入れない（途中でやめて始め直しても、同じ問題は今日もう出ない）
   if (tab === "due" && one === undefined) pages = pages.filter(p => p.picked.some(r => !r.d.doneToday));
   if (!pages.length) { if (tab === "due") toast("今日の総復習は終わりました。間違えた問題は、次の日以降に出ます"); return; }
-  if (ses && !confirm(`途中の演習（${ses.name} ${ses.pos + 1}/${ses.keys.length}）があります。やめて新しく始めますか？`)) return;
+  if (ses && !confirm(`途中の演習（${ses.name} ${qPosText(ses, ses.pos)}）があります。やめて新しく始めますか？`)) return;
   // 総復習でも、今日もう解いた（済み）問題は予定に数えない。始めた時点の済みを覚えておく（解くと済みになるため）。
   // 解く問題がすべて済みなら、その演習は臨時の演習にする
   const done = tab === "due" ? pages.flatMap(p => p.picked.filter(r => r.d.doneToday).map(r => r.it.id)) : [];
   const free = tab !== "due" || pages.every(p => p.picked.every(r => r.d.doneToday));
-  ses = { id: Date.now().toString(36), name: tabName(tab) + (JUDGE_NAME[judgeSel] ? `（${JUDGE_NAME[judgeSel]}）` : "") + (gname ? "：" + gname : ""), tab, free, done, keys: pages.map(p => p.key), pos: 0, st: {}, shown: {}, open: true };
+  // cnt：ページごとの問題数（連問は1ページに小問が複数。表示は問題数で数える）
+  const cnt = Object.fromEntries(pages.map(p => [p.key, p.picked.filter(r => tab !== "due" || !r.d.doneToday).length || 1]));
+  ses = { id: Date.now().toString(36), name: tabName(tab) + (JUDGE_NAME[judgeSel] ? `（${JUDGE_NAME[judgeSel]}）` : "") + (gname ? "：" + gname : ""), tab, free, done, keys: pages.map(p => p.key), cnt, pos: 0, st: {}, shown: {}, open: true };
   saveSes();
   openSession();
 }
@@ -410,7 +426,7 @@ function showReview(top) {
   const y = window.scrollY;
   const done = ses.done || [], pageFree = ses.free || p.members.every(r => done.includes(r.it.id));
   const mode = pageFree ? `<span class="pill free">${ses.free ? "臨時の演習" : "今日もう解いた問題"}・復習の予定には反映しません</span>` : '<span class="pill due">総復習・復習の予定に反映します</span>';
-  $("reviewView").innerHTML = `<div class="meta">${mode} ${esc(ses.name)} ${ses.pos + 1} / ${pages.length}${nAns > 1 ? "　（" + nAns + "つ選ぶ）" : ""}</div>
+  $("reviewView").innerHTML = `<div class="meta">${mode} ${esc(ses.name)} ${qPosText(ses, ses.pos)}問${nAns > 1 ? "　（" + nAns + "つ選ぶ）" : ""}</div>
     <article class="item"><div class="top"><span class="qid">${esc(pageLabel(p))}</span>${p.lead.it.required ? '<span class="pill due">必修</span>' : ""}
       ${series ? '<span class="pill">連問</span>' : `${leechPill(p.lead.d)}<span class="pill miss">${p.lead.d.miss}回間違い</span>`}</div>
     <div class="tags">${tags.map(t => `<span class="chip">#${esc(t)}<button class="x" data-untag="${esc(t)}" aria-label="タグ ${esc(t)} を外す">×</button></span>`).join("")}
