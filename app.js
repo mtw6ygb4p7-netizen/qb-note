@@ -335,6 +335,32 @@ function dropStaleSes() {
   toast("前の日の途中の演習は終わりにしました（解いた記録は残っています）。今日の総復習は「総復習」のタブから始めてください", 8000);
   return true;
 }
+// 総復習の途中の演習を、ほかの端末の記録に合わせる（2026-11-17〜。同期のあと・開いたとき）。
+// PCで途中まで解いて同期 → スマホで同期して続ける、のように、どの端末で続けても「今日まだ解いていない問題」から続くようにする。
+// ほかの端末（とQB）で今日もう解いた問題のページは、この端末でまだ触っていなければ外す。外したページ数を返す
+function syncSes() {
+  if (!ses || ses.tab !== "due" || ses.free) return 0;
+  const { byKey } = view();
+  const mine = dev() + ":" + ses.id + ":", done = ses.done || [];
+  const elsewhere = r => r.d.attempts.some(t => QB.counts(t) && QB.dayKey(t.at) === today() && !String(t.key).startsWith(mine)
+    && (QB.isMiss(t.judge) || QB.isCorrect(t.judge)));
+  const cur = ses.keys[ses.pos];
+  const keep = ses.keys.filter(k => {
+    const ms = byKey.get(k) || [];
+    if (ses.shown[k] || ms.some(m => (ses.st[m.it.id] || {}).judge)) return true; // この端末で解いたページは残す（前の問題で戻れる）
+    const solve = ms.filter(m => m.d.miss > 0 && !done.includes(m.it.id));
+    return !(solve.length && solve.every(elsewhere));
+  });
+  const n = ses.keys.length - keep.length;
+  if (!n) return 0;
+  const before = ses.keys.slice(0, ses.pos).filter(k => keep.includes(k)).length;
+  ses.keys = keep;
+  ses.pos = keep.includes(cur) ? keep.indexOf(cur) : before;
+  if (!keep.length || ses.pos >= keep.length && keep.every(k => ses.shown[k])) { ses = null; saveSes(); return n; }
+  ses.pos = Math.min(ses.pos, keep.length - 1);
+  saveSes();
+  return n;
+}
 let pageCache = null; // 今のセッションのページ（データが変わったら作り直す）
 function sesPages() {
   const { byKey } = view();
@@ -774,6 +800,10 @@ async function syncAll() {
     if (pc && pc.images) parts.push(`画像${pc.images}枚を送信`);
     parts.push(got ? `問題データ ${got}問を受信` : "問題データは前回と同じ");
     if (imgs) parts.push(`画像${imgs}枚を受信`);
+    const had = !!ses, cut = syncSes();
+    if (cut) parts.push(had && !ses ? "途中の総復習は、ほかの端末で終わっていました" : `途中の総復習から、ほかの端末で解いた${cut}問を外しました`);
+    if (had && !ses && inPractice()) { $("reviewView").hidden = true; $("listView").hidden = false; }
+    else if (cut && inPractice()) showReview(true);
     toast("同期しました（" + parts.join("・") + "）");
   } catch (e) {
     gh.syncAt = Date.now(); gh.syncError = String(e && e.message || e);
@@ -931,6 +961,7 @@ document.addEventListener("visibilitychange", () => {
   ready = true;
   showGhForm();
   dropStaleSes();
+  syncSes();
   if (ses && ses.open) openSession(); else render(); // 解いている途中で閉じたなら、その問題から
   // 端末の保存を消されにくくする（ホーム画面に置いたアプリは通常消されない）
   try { if (navigator.storage && navigator.storage.persist) await navigator.storage.persist(); } catch (e) {}
