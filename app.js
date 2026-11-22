@@ -472,7 +472,7 @@ function showReview(top) {
     <div class="nav"><button id="rvPrev"${ses.pos ? "" : " disabled"}>← 前の問題</button>
       ${shown ? `<button class="go" id="rvNext">${last ? "終わる" : "次の問題 →"}</button>` : `<button class="go" id="rvShow">答え合わせ</button>`}
       ${shown || last ? "" : '<button id="rvSkip">次の問題 →</button>'}</div>
-    <div class="nav"><button id="rvEnd">終了（あとで続きから）</button></div>`;
+    <div class="nav"><button id="rvEnd">終了（あとで続きから）</button><button id="rvDel">この問題を削除</button></div>`;
   window.scrollTo(0, top ? 0 : y); // 選んだだけでは画面を動かさない
 }
 const go = d => { ses.pos += d; saveSes(); showReview(true); };
@@ -484,6 +484,17 @@ $("reviewView").addEventListener("click", e => {
   if (t.closest("#rvSkip")) { go(1); return; }
   if (t.closest("#rvNext")) { if (ses.pos + 1 >= pageCache.pages.length) closeSession(true); else go(1); return; }
   if (t.closest("#rvEnd")) { closeSession(false); return; }
+  // 演習の途中で削除（一覧の「削除」と同じ。連問は1ページまとめて）。演習からも外して、次の問題を出す
+  if (t.closest("#rvDel")) {
+    if (!confirm("この問題を記録から削除しますか？（このあとQBでまた間違えると、もう一度登録されます）")) return;
+    addOps(p.members.map(m => m.it.id), "delete");
+    ses.keys = ses.keys.filter(k => k !== p.key);
+    delete ses.shown[p.key]; if (ses.cnt) delete ses.cnt[p.key];
+    toast("削除しました");
+    if (!ses.keys.length) { closeSession(true); return; }
+    if (ses.pos >= ses.keys.length) ses.pos = ses.keys.length - 1;
+    saveSes(); showReview(true); return;
+  }
   if (t.closest("#rvShow")) {
     ses.shown[p.key] = true;
     for (const m of p.members) {
