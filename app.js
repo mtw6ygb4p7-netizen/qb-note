@@ -200,23 +200,23 @@ const answersOf = it => String(it.answer || "").split(/[,、\s]+/).filter(Boolea
 function card(p) {
   const series = p.members.length > 1;
   const pre = series ? QB.splitText(p.members[0].it.text).pre : "";
-  const qImgs = [...new Set(p.members.flatMap(m => QB.imagesOf(m.it).q))];
-  const subs = p.members.map(m => {
-    const { it, d } = m, ans = answersOf(it), im = QB.imagesOf(it);
+  const pim = QB.pageImages(p.members); // 前文の画像・小問ごとの画像・解説の画像
+  const subs = p.members.map((m, i) => {
+    const { it, d } = m, ans = answersOf(it);
     const ch = (it.choices || []).map(c => `<div class="choice${ans.includes(c.n) ? " ans" : ""}">${esc(c.n)}　${esc(c.text)}${ans.includes(c.n) ? "　← 正解" : ""}</div>`).join("");
     // 臨時の演習（free）は「練習」と付けて薄く出す（復習の予定には数えていない）
     const h = d.attempts.filter(t => t.judge).map(t => `<span${t.free ? ' class="free" title="臨時の演習（復習の予定には数えない）"' : ""}>${ld(t.at)} <b class="${jc(t.judge)}">${esc(t.judge)}</b>${t.free ? "練習" : ""}</span>`).join("");
     const body = subBody(it, series);
     return `<div class="${series ? "subq" : ""}">${series ? `<div class="top"><span class="qid">${esc(it.label)}</span>${statusPills(m)}</div>` : ""}
-      <div class="q">${esc(body)}</div>
-      <details><summary>選択肢・正解・解説</summary>${ch}<div class="exp">${esc(it.explanation)}</div>${imgTags(im.exp)}</details>
+      <div class="q">${esc(body)}</div>${imgTags(pim.sub[i])}
+      <details><summary>選択肢・正解・解説</summary>${ch}<div class="exp">${esc(it.explanation)}</div>${!series || i === p.members.length - 1 ? imgTags(pim.exp) : ""}</details>
       ${h ? `<div class="hist">${h}</div>` : ""}</div>`;
   }).join("");
   const lead = p.lead;
   return `<article class="item" data-key="${esc(p.key)}"><div class="top"><span class="qid">${esc(pageLabel(p))}</span>
     ${revTab() && pageRevDone(p) ? '<span class="pill done">今日の復習 済み</span>' : ""}${lead.it.required ? '<span class="pill due">必修</span>' : ""}${series ? '<span class="pill">連問</span>' : statusPills(lead)}
     ${series ? "" : `<span>最後に間違えた ${lead.d.lastMissAt ? ld(lead.d.lastMissAt) : "-"}</span>`}${tagChips(tagsOfPage(p))}</div>
-    ${series ? `<div class="q">${esc(pre)}</div>` : ""}${imgTags(qImgs)}${subs}
+    ${series ? `<div class="q">${esc(pre)}</div>` : ""}${imgTags(pim.pre)}${subs}
     <div class="acts"><button class="go" data-act="solve">この問題を解く</button><button data-act="del">削除</button>${p.members.some(m => m.d.cleared) ? '<button data-act="back">一覧に戻す</button>' : ""}${p.members.some(m => m.d.leech) ? '<button data-act="unleech">苦手から外す</button>' : ""}</div></article>`;
 }
 
@@ -425,7 +425,7 @@ function seriesExp(p) {
   const paras = p.members.map(m => String(m.it.explanation || "").split(/\n\s*\n/).map(x => x.trim()).filter(Boolean));
   const shared = new Set(paras.flat().filter((x, i, a) => a.indexOf(x) !== i));
   const parts = p.members.map((m, i) => `<div class="exp"><b>${esc(m.it.label)}</b>　正解：${esc(m.it.answer)}\n\n${esc(paras[i].filter(x => !shared.has(x)).join("\n\n"))}</div>`);
-  const imgs = [...new Set(p.members.flatMap(m => QB.imagesOf(m.it).exp))];
+  const imgs = QB.pageImages(p.members).exp;
   return `<div class="subq"><div class="top"><span class="qid">解説（まとめ）</span></div>${parts.join("")}${shared.size ? `<div class="exp">${esc([...shared].join("\n\n"))}</div>` : ""}${imgTags(imgs)}</div>`;
 }
 function showReview(top) {
@@ -437,10 +437,10 @@ function showReview(top) {
   const shown = !!ses.shown[p.key];
   const series = p.members.length > 1;
   const pre = series ? QB.splitText(p.members[0].it.text).pre : "";
-  // 答える前は問題の画像だけ。解説の画像は答え合わせのあと
-  const qImgs = [...new Set(p.members.flatMap(m => QB.imagesOf(m.it).q))];
-  const subs = p.members.map(m => {
-    const { it, d } = m, ans = answersOf(it), solve = d.miss > 0, st = stOf(it.id), im = QB.imagesOf(it);
+  // 答える前は問題の画像だけ（前文の画像は前文の下、小問の画像はその小問の文の下）。解説の画像は答え合わせのあと
+  const pim = QB.pageImages(p.members);
+  const subs = p.members.map((m, i) => {
+    const { it, d } = m, ans = answersOf(it), solve = d.miss > 0, st = stOf(it.id);
     const chosen = solve ? new Set(st.chosen) : new Set(ans);
     const ch = (it.choices || []).map(c => {
       const picked = chosen.has(c.n), isAns = (shown || !solve) && ans.includes(c.n);
@@ -450,8 +450,8 @@ function showReview(top) {
     const body = subBody(it, series);
     return `<div class="${series ? "subq" : ""}${solve ? "" : " done"}">
       ${series ? `<div class="top"><span class="qid">${esc(it.label)}</span>${leechPill(d)}${solve ? `<span class="pill miss">✖ ${d.miss}回間違い・解く</span>` : '<span class="pill ok">○ QBで正解（答えは選択済み）</span>'}${ans.length > 1 && solve ? `<span>（${ans.length}つ選ぶ）</span>` : ""}</div>` : ""}
-      <div class="q">${esc(body)}</div><div class="choices">${ch}</div>
-      ${shown ? `${series ? "" : `<div class="exp">正解：${esc(it.answer)}\n\n${esc(it.explanation)}</div>${imgTags(im.exp)}`}
+      <div class="q">${esc(body)}</div>${imgTags(pim.sub[i])}<div class="choices">${ch}</div>
+      ${shown ? `${series ? "" : `<div class="exp">正解：${esc(it.answer)}\n\n${esc(it.explanation)}</div>${imgTags(pim.exp)}`}
         ${solve ? `<div class="judge">自己判定：${judgeBtns(it.id, st.judge)}<span class="note">${st.judge ? "この判定で記録しました" : "判定を選ぶと記録します"}</span></div>` : ""}` : ""}</div>`;
   }).join("");
   const tags = tagsOfPage(p);
@@ -468,7 +468,7 @@ function showReview(top) {
       <input id="tagIn" list="tagList" placeholder="タグを追加" enterkeyhint="done" autocomplete="off"><button id="tagAdd">追加</button>
       <datalist id="tagList">${known.map(t => `<option value="${esc(t)}">`).join("")}</datalist>
       ${known.slice(0, 8).map(t => `<button class="chip pick" data-addtag="${esc(t)}">+#${esc(t)}</button>`).join("")}</div>
-    ${series ? `<div class="q">${esc(pre)}</div>` : ""}${imgTags(qImgs)}${subs}${series && shown ? seriesExp(p) : ""}</article>
+    ${series ? `<div class="q">${esc(pre)}</div>` : ""}${imgTags(pim.pre)}${subs}${series && shown ? seriesExp(p) : ""}</article>
     <div class="nav"><button id="rvPrev"${ses.pos ? "" : " disabled"}>← 前の問題</button>
       ${shown ? `<button class="go" id="rvNext">${last ? "終わる" : "次の問題 →"}</button>` : `<button class="go" id="rvShow">答え合わせ</button>`}
       ${shown || last ? "" : '<button id="rvSkip">次の問題 →</button>'}</div>
@@ -779,7 +779,7 @@ async function receiveAll() {
   }
   // まだ端末に無い画像（問題の画像と解説の画像）
   let imgs = 0;
-  for (const it of allItems()) for (const u of [...(it.images || []), ...(it.expImages || [])]) {
+  for (const it of allItems()) for (const u of [...(it.preImages || []), ...(it.images || []), ...(it.expImages || [])]) {
     if (images[u]) continue;
     const ir = await ghApi("images/" + u.split("/").pop(), { raw: true });
     if (!ir) continue; // PCがまだ置いていない

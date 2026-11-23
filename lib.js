@@ -169,6 +169,35 @@ const QB = {
     const refers = /図|写真|画像|グラフ|表|心電図|波形|示す|別に示|エックス線|X線|CT|MRI|エコー|超音波/.test(it.text || "");
     return refers ? { q: it.images || [], exp: [] } : { q: [], exp: it.images || [] };
   },
+  // 画像の名前の問題番号：「…/images/108A062-1.jpg」→「108A62」（0を外して問題の label と比べる）
+  imageNo: (u) => {
+    const m = String(u || "").split("/").pop().match(/^(.+?)-[^-]*$/);
+    return m ? m[1].replace(/^(\D*)0+(\d)/, "$1$2").replace(/([A-Z])0+(\d)/g, "$1$2") : "";
+  },
+  // 1ページ（単問、または連問の小問すべて）の画像を、出す場所ごとに分ける（2026-11-23〜）
+  //   pre：前文の下／sub[i]：i番目の小問の文の下／exp：答え合わせのあとの解説
+  // cv 4 からは前文の画像（preImages）と小問の画像（images）を分けて記録している。
+  // それより前の連問の記録は全小問の画像が混ざっていることがあるので、画像の名前の問題番号で小問を決める
+  // （先頭の小問の番号の画像と、番号が合わない画像は前文の下）。前は全部を前文の下にまとめて出していた（2問目の図が1問目の上に出た）
+  pageImages(members) {
+    const its = members.map((m) => m.it || m);
+    const exp = [...new Set(its.flatMap((it) => QB.imagesOf(it).exp))];
+    const expSet = new Set(exp);
+    const pre = [], sub = its.map(() => []), placed = new Set();
+    const put = (list, u) => { if (!placed.has(u) && !expSet.has(u)) { placed.add(u); list.push(u); } };
+    const norm = (l) => String(l || "").replace(/([A-Z])0+(\d)/g, "$1$2");
+    if (its.length === 1) {
+      for (const u of [...(its[0].preImages || []), ...QB.imagesOf(its[0]).q]) put(sub[0], u);
+      return { pre, sub, exp };
+    }
+    const owner = (u) => its.findIndex((it) => norm(it.label) === QB.imageNo(u));
+    its.forEach((it, i) => { if (it.cv >= 4) { (it.preImages || []).forEach((u) => put(pre, u)); (it.images || []).forEach((u) => put(sub[i], u)); } });
+    its.forEach((it) => {
+      if (it.cv >= 4) return;
+      for (const u of QB.imagesOf(it).q) { const j = owner(u); put(j > 0 ? sub[j] : pre, u); }
+    });
+    return { pre, sub, exp };
+  },
 
   // ---- 同期の操作（タグ・削除・一覧に戻す）----
   // 端末ごとの記録ファイル（records/<端末>.json）に ops として残し、PCの拡張機能が取り込む。
